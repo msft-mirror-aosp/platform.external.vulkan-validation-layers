@@ -1,0 +1,45 @@
+cc_library_static {
+    name: "libvkjson",
+    clang: true,
+    srcs: [
+        "vkjson.cc",
+        "vkjson_instance.cc",
+    ],
+    cppflags: [
+        "-std=c++11",
+        "-Wno-sign-compare",
+    ],
+    export_include_dirs: [
+        ".",
+    ],
+    whole_static_libs: [
+        "cjson",
+    ],
+    header_libs: [
+        "vk_headers",
+    ],
+}
+
+cc_library_static {
+    name: "libvkjson_ndk",
+    clang: true,
+    srcs: [
+        "vkjson.cc",
+        "vkjson_instance.cc",
+    ],
+    cppflags: [
+        "-std=c++11",
+        "-Wno-sign-compare",
+    ],
+    export_include_dirs: [
+        ".",
+    ],
+    whole_static_libs: [
+        "cjson_ndk",
+    ],
+    header_libs: [
+        "vk_headers_ndk",
+    ],
+    sdk_version: "24",
+    stl: "libc++_static",
+}
