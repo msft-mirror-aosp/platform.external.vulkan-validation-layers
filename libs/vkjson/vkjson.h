@@ -42,10 +42,13 @@ struct VkJsonDevice {
   VkJsonDevice() {
           memset(&properties, 0, sizeof(VkPhysicalDeviceProperties));
           memset(&features, 0, sizeof(VkPhysicalDeviceFeatures));
+          memset(&variable_pointer_features, 0,
+                 sizeof(VkPhysicalDeviceVariablePointerFeaturesKHR));
           memset(&memory, 0, sizeof(VkPhysicalDeviceMemoryProperties));
   }
   VkPhysicalDeviceProperties properties;
   VkPhysicalDeviceFeatures features;
+  VkPhysicalDeviceVariablePointerFeaturesKHR variable_pointer_features;
   VkPhysicalDeviceMemoryProperties memory;
   std::vector<VkQueueFamilyProperties> queues;
   std::vector<VkExtensionProperties> extensions;
