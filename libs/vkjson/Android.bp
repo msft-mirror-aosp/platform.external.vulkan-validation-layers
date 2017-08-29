@@ -1,6 +1,5 @@
 cc_library_static {
     name: "libvkjson",
-    clang: true,
     srcs: [
         "vkjson.cc",
         "vkjson_instance.cc",
@@ -16,7 +15,7 @@ cc_library_static {
         "cjson",
     ],
     header_libs: [
-        "vk_headers",
+        "vulkan_headers",
     ],
 }
 
@@ -38,7 +37,7 @@ cc_library_static {
         "cjson_ndk",
     ],
     header_libs: [
-        "vk_headers_ndk",
+        "vulkan_headers_ndk",
     ],
     sdk_version: "24",
     stl: "libc++_static",
