@@ -104,6 +104,12 @@ VkJsonDevice VkJsonGetDevice(VkInstance instance,
         nullptr,
         {}  // features
     };
+    if (HasExtension("VK_KHR_variable_pointers", device.extensions)) {
+      device.variable_pointer_features.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTER_FEATURES_KHR;
+      device.variable_pointer_features.pNext = features.pNext;
+      features.pNext = &device.variable_pointer_features;
+    }
     vkpGetPhysicalDeviceFeatures2KHR(physical_device, &features);
     device.features = features.features;
   } else {
