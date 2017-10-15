@@ -5,21 +5,17 @@ This repository does not contain a Vulkan-capable driver.
 Before proceeding, it is strongly recommended that you obtain a Vulkan driver from your graphics hardware vendor
 and install it.
 
-Note: The sample Vulkan Intel driver for Linux (ICD) is being deprecated in favor of other driver options from Intel.
-This driver has been moved to the [VulkanTools repo](https://github.com/LunarG/VulkanTools).
-Further instructions regarding this ICD are available there.
-
 ## Contributing
 
 If you intend to contribute, the preferred work flow is for you to develop your contribution
 in a fork of this repo in your GitHub account and then submit a pull request.
-Please see the [CONTRIBUTING](CONTRIBUTING.md) file in this respository for more details.
+Please see the [CONTRIBUTING](CONTRIBUTING.md) file in this repository for more details.
 
 ## Git the Bits
 
 To create your local git repository:
 ```
-git clone https://github.com/KhronosGroup/Vulkan-LoaderAndValidationLayers 
+git clone https://github.com/KhronosGroup/Vulkan-LoaderAndValidationLayers
 ```
 
 ## Linux Build
@@ -27,12 +23,12 @@ git clone https://github.com/KhronosGroup/Vulkan-LoaderAndValidationLayers
 The build process uses CMake to generate makefiles for this project.
 The build generates the loader, layers, and tests.
 
-This repo has been built and tested on Ubuntu 14.04.3 LTS, 14.10, 15.04, 15.10, and 16.04 LTS.
+This repo has been built and tested on the two most recent Ubuntu LTS versions.
 It should be straightforward to use it on other Linux distros.
 
-These packages are needed to build this repository: 
+These packages are needed to build this repository:
 ```
-sudo apt-get install git cmake build-essential bison libx11-dev libxcb1-dev
+sudo apt-get install git cmake build-essential bison libx11-xcb-dev libxkbcommon-dev libmirclient-dev libwayland-dev libxrandr-dev
 ```
 
 Example debug build (Note that the update\_external\_sources script used below builds external tools into predefined locations. See **Loader and Validation Layer Dependencies** for more information and other options):
@@ -58,6 +54,11 @@ The `LoaderAndLayerInterface` document in the `loader` folder in this repository
 describes both how ICDs and layers should be properly
 packaged, and how developers can point to ICDs and layers within their builds.
 
+### WSI Support Build Options
+By default, the Vulkan Loader and Validation Layers are built with support for all 4 Vulkan-defined WSI display systems, Xcb, Xlib, Wayland, and Mir.  It is recommended to build these modules with support for these
+display systems to maximize their usability across Linux platforms.
+If it is necessary to build these modules without support for one of the display systems, the appropriate CMake option of the form BUILD_WSI_xxx_SUPPORT can be set to OFF.   See the top-level CMakeLists.txt file for more info.
+
 ### Linux Install to System Directories
 
 Installing the files resulting from your build to the systems directories is optional since
@@ -78,7 +79,7 @@ This command installs files to:
 * `/usr/local/include/vulkan`:  Vulkan include files
 * `/usr/local/lib`:  Vulkan loader and layers shared objects
 * `/usr/local/bin`:  vulkaninfo application
-* `/etc/vulkan/explicit_layer.d`:  Layer JSON files
+* `/usr/local/etc/vulkan/explicit_layer.d`:  Layer JSON files
 
 You may need to run `ldconfig` in order to refresh the system loader search cache on some Linux systems.
 
@@ -89,17 +90,78 @@ You can easily remove the installed files with:
 cat install_manifest.txt | sudo xargs rm
 ```
 
-See the CMake documentation for details on using `DESTDIR` and `CMAKE_INSTALL_PREFIX` to customize
-your installation location.
+You can further customize the installation location by setting additional CMake variables
+to override their defaults.
+For example, if you would like to install to `/tmp/build` instead of `/usr/local`, specify:
+
+```
+-DCMAKE_INSTALL_PREFIX=/tmp/build
+-DDEST_DIR=/tmp/build
+```
+
+on your CMake command line and run `make install` as before.
+The install step places the files in `/tmp/build`.
+
+Using the `CMAKE_INSTALL_PREFIX` to customize the install location also modifies the
+loader search paths to include searching for layers in the specified install location.
+In this example, setting `CMAKE_INSTALL_PREFIX` to `/tmp/build` causes the loader to
+search `/tmp/build/etc/vulkan/explicit_layer.d` and `/tmp/build/share/vulkan/explicit_layer.d`
+for the layer JSON files.
+The loader also searches the "standard" system locations of `/etc/vulkan/explicit_layer.d`
+and `/usr/share/vulkan/explicit_layer.d` after searching the two locations under `/tmp/build`.
+
+You can further customize the installation directories by using the CMake variables
+`CMAKE_INSTALL_SYSCONFDIR` to rename the `etc` directory and `CMAKE_INSTALL_DATADIR`
+to rename the `share` directory.
+
+See the CMake documentation for more details on using these variables
+to further customize your installation.
+
+Also see the `LoaderAndLayerInterface` document in the `loader` folder in this repository for more
+information about loader operation.
 
 Note that some executables in this repository (e.g., `cube`) use the "rpath" linker directive
 to load the Vulkan loader from the build directory, `dbuild` in this example.
 This means that even after installing the loader to the system directories, these executables
 still use the loader from the build directory.
 
+### Linux 32-bit support
+
+Usage of this repository's contents in 32-bit Linux environments is not officially supported.
+However, since this repository is supported on 32-bit Windows, these modules should generally
+work on 32-bit Linux.
+
+Here are some notes for building 32-bit targets on a 64-bit Ubuntu "reference" platform:
+
+If not already installed, install the following 32-bit development libraries:
+
+`gcc-multilib g++-multilib libx11-dev:i386`
+
+This list may vary depending on your distro and which windowing systems you are building for.
+
+Set up your environment for building 32-bit targets:
+
+```
+export ASFLAGS=--32
+export CFLAGS=-m32
+export CXXFLAGS=-m32
+export PKG_CONFIG_LIBDIR=/usr/lib/i386-linux-gnu
+```
+
+Again, your PKG_CONFIG configuration may be different, depending on your distro.
+
+If the libraries in the `external` directory have already been built
+for 64-bit targets,
+delete or "clean" this directory and rebuild it with
+the above settings using the `update_external_sources` shell script.
+This is required because the libraries in `external` must be built for
+32-bit in order to be usable by the rest of the components in the repository.
+
+Finally, rebuild the repository using `cmake` and `make`, as explained above.
+
 ## Validation Test
 
-The test executables can be found in the dbuild/tests directory. 
+The test executables can be found in the dbuild/tests directory.
 Some of the tests that are available:
 - vk\_layer\_validation\_tests: Test Vulkan layers.
 
@@ -112,6 +174,12 @@ Some demos that can be found in the dbuild/demos directory are:
 - vulkaninfo: report GPU properties
 - cube: a textured spinning cube
 - smoke/smoke: A "smoke" test using a more complex Vulkan demo
+
+You can select which WSI subsystem is used to build the demos using a cmake option called DEMOS_WSI_SELECTION.
+Supported options are XCB (default), XLIB, WAYLAND, and MIR.  Note that you must build using the corresponding BUILD_WSI_*_SUPPORT enabled at the base repo level (all SUPPORT options are ON by default).
+For instance, creating a build that will use Xlib to build the demos, your cmake command line might look like:
+
+cmake -H. -Bbuild -DCMAKE_BUILD_TYPE=Debug -DDEMOS_WSI_SELECTION=XLIB
 
 ## Windows System Requirements
 
@@ -126,7 +194,7 @@ Windows 7+ with additional required software packages:
   - Need python3.3 or later to get the Windows py.exe launcher that is used to get python3 rather than python2 if both are installed on Windows
   - 32 bit python works
 - [Git](http://git-scm.com/download/win).
-  - Note: If you use Cygwin, you can normally use Cygwin's "git.exe".  However, in order to use the "update\_external\_sources.bat" script, you must have this version.
+  - Note: If you use Cygwin, you can normally use Cygwin's "git.exe", and "update\_external\_sources.sh --no-build" does support Cygwin's git.  However, in order to use the "update\_external\_sources.bat" script, you must have this version.
   - Tell the installer to allow it to be used for "Developer Prompt" as well as "Git Bash".
   - Tell the installer to treat line endings "as is" (i.e. both DOS and Unix-style line endings).
   - Install each a 32-bit and a 64-bit version, as the 64-bit installer does not install the 32-bit libraries and tools.
@@ -139,13 +207,13 @@ Windows 7+ with additional required software packages:
 
 Before building on Windows, you may want to modify the customize section in loader/loader.rc to so as to
 set the version numbers and build description for your build. Doing so will set the information displayed
-for the Properites->Details tab of the loader vulkan-1.dll file that is built.
+for the Properties->Details tab of the loader vulkan-1.dll file that is built.
 
 Build all Windows targets after installing required software and cloning the Loader and Validation Layer repo as described above by completing the following steps in a "Developer Command Prompt for VS2013" window (Note that the update\_external\_sources script used below builds external tools into predefined locations. See **Loader and Validation Layer Dependencies** for more information and other options):
 ```
 cd Vulkan-LoaderAndValidationLayers  # cd to the root of the cloned git repository
-update_external_sources.bat --all
-build_windows_targets.bat 
+update_external_sources.bat
+build_windows_targets.bat
 ```
 
 At this point, you can use Windows Explorer to launch Visual Studio by double-clicking on the "VULKAN.sln" file in the \build folder.  Once Visual Studio comes up, you can select "Debug" or "Release" from a drop-down list.  You can start a build with either the menu (Build->Build Solution), or a keyboard shortcut (Ctrl+Shift+B).  As part of the build process, Python scripts will create additional Visual Studio files and projects, along with additional source files.  All of these auto-generated files are under the "build" folder.
@@ -157,31 +225,57 @@ This is described in a `LoaderAndLayerInterface` document in the `loader` folder
 This specification describes both how ICDs and layers should be properly
 packaged, and how developers can point to ICDs and layers within their builds.
 
+### Using Cygwin Git
+
+If you are using Cygwin git instead of win32-native git, you can use the *sh* script to sync using Cygwin's git (but not also build), then use the *bat* script to build (but not also sync).
+
+In a cygwin shell do this:
+```
+./update_external_sources.sh --no-build
+```
+
+Then in a Visual Studio Developer Command Prompt shell do this:
+```
+update_external_sources.bat --no-sync
+```
+
 ## Android Build
-Install the required tools for Linux and Windows covered above, then add the
-following.
+Install the required tools for Linux and Windows covered above, then add the following.
 ### Android Studio
-- Install [Android Studio 2.1](http://tools.android.com/download/studio/canary), latest Preview (tested with 4):
+- Install [Android Studio 2.3](https://developer.android.com/studio/index.html) or later.
 - From the "Welcome to Android Studio" splash screen, add the following components using Configure > SDK Manager:
-  - SDK Platforms > Android N Preview
+  - SDK Platforms > Android 6.0 and newer
+  - SDK Tools > Android SDK Build-Tools
+  - SDK Tools > Android SDK Platform-Tools
+  - SDK Tools > Android SDK Tools
   - SDK Tools > Android NDK
 
-#### Add NDK to path
+#### Add Android specifics to environment
 
 On Linux:
 ```
-export PATH=$HOME/Android/sdk/ndk-bundle:$PATH
+export ANDROID_SDK_HOME=$HOME/Android/sdk
+export ANDROID_NDK_HOME=$HOME/Android/sdk/ndk-bundle
+export PATH=$ANDROID_SDK_HOME:$PATH
+export PATH=$ANDROID_NDK_HOME:$PATH
+export PATH=$ANDROID_SDK_HOME/build-tools/23.0.3:$PATH
 ```
 On Windows:
 ```
+set ANDROID_SDK_HOME=%LOCALAPPDATA%\Android\sdk
+set ANDROID_NDK_HOME=%LOCALAPPDATA%\Android\sdk\ndk-bundle
 set PATH=%LOCALAPPDATA%\Android\sdk\ndk-bundle;%PATH%
 ```
 On OSX:
 ```
-export PATH=$HOME/Library/Android/sdk/ndk-bundle:$PATH
+export ANDROID_SDK_HOME=$HOME/Library/Android/sdk
+export ANDROID_NDK_HOME=$HOME/Library/Android/sdk/ndk-bundle
+export PATH=$ANDROID_NDK_PATH:$PATH
+export PATH=$ANDROID_SDK_HOME/build-tools/23.0.3:$PATH
 ```
+Note: If jarsigner is missing from your platform, you can find it in the Android Studio install.
 ### Additional OSX System Requirements
-Tested on OSX version 10.11.4
+Tested on OSX version 10.12.4
 
  Setup Homebrew and components
 - Follow instructions on [brew.sh](http://brew.sh) to get homebrew installed.
@@ -197,46 +291,80 @@ export PATH=/usr/local/bin:$PATH
 brew install cmake python python3 git
 ```
 ### Build steps for Android
-Use the following to ensure the Android build works.
 
 There are two options for building the Android layers. One using the SPIRV tools
 provided as part of the Android NDK or build using upstream sources.
-
-#### Building with NDK SPIRV tools
-##### Linux and OSX
+To build with SPIRV tools from the NDK, remove the build-android/third_party directory created
+by running update_external_sources_android.sh, (or never run update_external_sources_android.sh).
+Use the following script to build everything in the repo for Android, including validation layers, tests, demos, and APK packaging:
+This script does retrieve and use the upstream SPRIV tools.
+```
+cd build-android
+./build_all.sh
+```
+Resulting validation layer binaries will be in build-android/libs.
+Test and demo APKs can be installed on production devices with:
+```
+./install_all.sh -s <serial number>
+```
+Note that there are no equivalent scripts on Windows yet, that work needs to be completed.
+The following per platform commands can be used for layer only builds:
+#### Linux and OSX
 Follow the setup steps for Linux or OSX above, then from your terminal:
 ```
 cd build-android
+./update_external_sources_android.sh
 ./android-generate.sh
 ndk-build -j $(sysctl -n hw.ncpu)
 ```
-##### Windows
+#### Windows
 Follow the setup steps for Windows above, then from Developer Command Prompt for VS2013:
 ```
 cd build-android
+update_external_sources_android.bat
 android-generate.bat
 ndk-build
 ```
-#### Android demos
-Use the following steps to build, install, and run Cube and Tri for Android:
+#### Android tests
+Use the following steps to build, install, and run the layer validation tests for Android:
 ```
-cd demos/android
-android update project -s -p . -t "android-23"
-ndk-build
-ant -buildfile cube debug
-adb install ./cube/bin/NativeActivity-debug.apk
+cd build-android
+./build_all.sh
+adb install -r bin/VulkanLayerValidationTests.apk
+adb shell am start com.example.VulkanLayerValidationTests/android.app.NativeActivity
+```
+Alternatively, you can use the test_APK script to install and run the layer validation tests:
+```
+test_APK.sh -s <serial number> -p <plaform name> -f <gtest_filter>
+```
+#### Android demos
+Use the following steps to build, install, and run Cube and Smoke for Android:
+```
+cd build-android
+./build_all.sh
+adb install -r ../demos/android/cube/bin/cube.apk
 adb shell am start com.example.Cube/android.app.NativeActivity
 ```
 To build, install, and run Cube with validation layers, first build layers using steps above, then run:
 ```
-cd demos/android
-android update project -s -p . -t "android-23"
-ndk-build -j
-ant -buildfile cube-with-layers debug
-adb install ./cube-with-layers/bin/NativeActivity-debug.apk
+cd build-android
+./build_all.sh
+adb install -r ../demos/android/cube-with-layers/bin/cube-with-layers.apk
+adb shell am start com.example.CubeWithLayers/android.app.NativeActivity
 adb shell am start -a android.intent.action.MAIN -c android-intent.category.LAUNCH -n com.example.CubeWithLayers/android.app.NativeActivity --es args "--validate"
 ```
+vkjson_info for Android is built as an executable for devices with root access.
 
+To use, simply push it to the device and run it:
+```
+./build_all.sh
+adb push obj/local/<abi>/vkjson_info /data/tmp/
+adb shell /data/tmp/vkjson_info
+```
+The resulting json file will be found in:
+```
+/sdcard/Android/<device_name>.json
+```
 To build, install, and run the Smoke demo for Android, run the following, and any
 prompts that come back from the script:
 ```
@@ -245,25 +373,7 @@ cd demos/smoke/android
 export ANDROID_SDK_HOME=<path to Android/Sdk>
 export ANDROID_NDK_HOME=<path to Android/Sdk/ndk-bundle>
 ./build-and-install
-adb shell am start com.example.Smoke/android.app.NativeActivity
-```
-
-#### Building with upstream sources
-##### Linux and OSX
-Follow the setup steps for Linux or OSX above, then from your terminal:
-```
-cd build-android
-./update_external_sources_android.sh
-./android-generate.sh
-ndk-build -j $(sysctl -n hw.ncpu) NDK_MODULE_PATH=..
-```
-##### Windows
-Follow the setup steps for Windows above, then from Developer Command Prompt for VS2013:
-```
-cd build-android
-update_external_sources_android.bat
-android-generate.bat
-ndk-build NDK_MODULE_PATH=..
+adb shell am start -a android.intent.action.MAIN -c android-intent.category.LAUNCH -n com.example.Smoke/android.app.NativeActivity --es args "--validate"
 ```
 
 ## Ninja Builds - All Platforms
@@ -274,7 +384,7 @@ The [Qt Creator IDE](https://qt.io/download-open-source/#section-2) can open a r
 - Then do the same with the Vulkan-LoaderAndValidationLayers CMakeList.txt file.
 - In order to debug with QtCreator, a [Microsoft WDK: eg WDK 10](http://go.microsoft.com/fwlink/p/?LinkId=526733) is required. Note that installing the WDK breaks the MSVC vcvarsall.bat build scripts provided by MSVC, requiring that the LIB, INCLUDE, and PATH env variables be set to the WDK paths by some other means
 
-## Loader and Validation Layer Dependencies 
+## Loader and Validation Layer Dependencies
 gslang and SPIRV-Tools repos are required to build and run Loader and Validation Layer components. They are not git sub-modules of Vulkan-LoaderAndValidationLayers but Vulkan-LoaderAndValidationLayers is linked to specific revisions of gslang and spirv-tools. These can be automatically cloned and built to predefined locations with the update\_external\_sources scripts. If a custom configuration is required, do the following steps:
 
 1) clone the repos:
@@ -308,7 +418,7 @@ _on windows_
     Especially valuable are the BASH shell and git packages.
   - If you don't want to use Cygwin, there are other shells and environments that can be used.
     You can also use a Git package that doesn't come from Cygwin.
-	
+
 - [Ninja on all platforms](https://github.com/ninja-build/ninja/releases). [The Ninja-build project](ninja-build.org). [Ninja Users Manual](ninja-build.org/manual.html) 
 
 - [QtCreator as IDE for CMake builds on all platforms](https://qt.io/download-open-source/#section-2)

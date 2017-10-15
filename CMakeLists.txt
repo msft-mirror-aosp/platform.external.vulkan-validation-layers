@@ -5,65 +5,68 @@ cmake_minimum_required(VERSION 2.8.11)
 project (VULKAN)
 # set (CMAKE_VERBOSE_MAKEFILE 1)
 
+# The API_NAME allows renaming builds to avoid conflicts with installed SDKs
 # The MAJOR number of the version we're building, used in naming
-# vulkan-<major>.dll (and other files).
+# <api-name>-<major>.dll (and other files).
+set(API_NAME "Vulkan" CACHE STRING "API name to use when building")
 set(MAJOR "1")
+string(TOLOWER ${API_NAME} API_LOWERCASE)
 
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 find_package(PythonInterp 3 REQUIRED)
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    add_definitions(-DVK_USE_PLATFORM_WIN32_KHR -DWIN32_LEAN_AND_MEAN)
-    set(DisplayServer Win32)
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Android")
-    add_definitions(-DVK_USE_PLATFORM_ANDROID_KHR)
-    set(DisplayServer Android)
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    #   Note: Supported configurations are XCB, XCB + Xlib, Wayland.
-    #         MIR is stubbed and untested
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(FALLBACK_CONFIG_DIRS "/etc/xdg" CACHE STRING
+        "Search path to use when XDG_CONFIG_DIRS is unset or empty or the current process is SUID/SGID. Default is freedesktop compliant.")
+    set(FALLBACK_DATA_DIRS "/usr/local/share:/usr/share" CACHE STRING
+        "Search path to use when XDG_DATA_DIRS is unset or empty or the current process is SUID/SGID. Default is freedesktop compliant.")
+
+    include(FindPkgConfig)
     option(BUILD_WSI_XCB_SUPPORT "Build XCB WSI support" ON)
     option(BUILD_WSI_XLIB_SUPPORT "Build Xlib WSI support" ON)
-    option(BUILD_WSI_WAYLAND_SUPPORT "Build Wayland WSI support" OFF)
+    option(BUILD_WSI_WAYLAND_SUPPORT "Build Wayland WSI support" ON)
     option(BUILD_WSI_MIR_SUPPORT "Build Mir WSI support" OFF)
+    set(DEMOS_WSI_SELECTION "XCB" CACHE STRING "Select WSI target for demos (XCB, XLIB, WAYLAND, MIR, DISPLAY)")
 
     if (BUILD_WSI_XCB_SUPPORT)
-        add_definitions(-DVK_USE_PLATFORM_XCB_KHR)
-        set(DisplayServer Xcb)
+        find_package(XCB REQUIRED)
     endif()
 
     if (BUILD_WSI_XLIB_SUPPORT)
-        add_definitions(-DVK_USE_PLATFORM_XLIB_KHR)
-        set(DisplayServer Xlib)
+        find_package(X11 REQUIRED)
     endif()
 
     if (BUILD_WSI_WAYLAND_SUPPORT)
-        add_definitions(-DVK_USE_PLATFORM_WAYLAND_KHR)
-        set(DisplayServer Wayland)
+        find_package(Wayland REQUIRED)
+        include_directories(${WAYLAND_CLIENT_INCLUDE_DIR})
     endif()
 
     if (BUILD_WSI_MIR_SUPPORT)
-        add_definitions(-DVK_USE_PLATFORM_MIR_KHR)
-        set(DisplayServer Mir)
+        find_package(Mir REQUIRED)
     endif()
 
-    if (NOT BUILD_WSI_XCB_SUPPORT AND NOT BUILD_WSI_XLIB_SUPPORT AND NOT BUILD_WSI_WAYLAND_SUPPORT AND NOT BUILD_WSI_MIR_SUPPORT)
-        set(DisplayServer Display)
-    endif()
-else()
-    message(FATAL_ERROR "Unsupported Platform!")
+    # This option can be used to suppress the installation of artifacts from the
+    # Vulkan-LoaderAndValidationLayers repo while running "make install" for the
+    # VulkanTools and VulkanSamples repos.  This can be used to prevent the
+    # overwriting of LVL artifacts when installing these downstream repos.
+    option(INSTALL_LVL_FILES "Install content from LoaderAndValidationLayers repo" ON)
 endif()
 
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+set(SCRIPTS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/scripts")
 
 # Header file for CMake settings
 include_directories("${PROJECT_SOURCE_DIR}/include")
 
-if(NOT WIN32)
-    include(FindPkgConfig)
-endif()
-
 if (CMAKE_COMPILER_IS_GNUCC OR CMAKE_C_COMPILER_ID MATCHES "Clang")
     set(COMMON_COMPILE_FLAGS "-Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers")
     set(COMMON_COMPILE_FLAGS "${COMMON_COMPILE_FLAGS} -fno-strict-aliasing -fno-builtin-memcmp")
+
+    # For GCC version 7.1 or greater, we need to disable the implicit fallthrough warning since
+    # there's no consistent way to satisfy all compilers until they all accept the C++17 standard
+    if (CMAKE_COMPILER_IS_GNUCC AND NOT (CMAKE_CXX_COMPILER_VERSION LESS 7.1))
+        set(COMMON_COMPILE_FLAGS "${COMMON_COMPILE_FLAGS} -Wimplicit-fallthrough=0")
+    endif()
+
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99 ${COMMON_COMPILE_FLAGS}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${COMMON_COMPILE_FLAGS} -std=c++11 -fno-rtti")
     if (UNIX)
@@ -73,14 +76,18 @@ if (CMAKE_COMPILER_IS_GNUCC OR CMAKE_C_COMPILER_ID MATCHES "Clang")
 endif()
 
 if(WIN32)
+    # Treat warnings as errors
+    add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/WX>")
     # Disable RTTI
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /GR-")
+    add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/GR->")
+    # Warn about nested declarations
+    add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/w34456>")
+    # Warn about potentially uninitialized variables
+    add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/w34701>")
+    add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/w34703>")
 endif()
 
 if(NOT WIN32)
-    if (BUILD_WSI_XCB_SUPPORT)
-        find_package(XCB REQUIRED)
-    endif()
     set (BUILDTGT_DIR build)
     set (BINDATA_DIR Bin)
     set (LIBSOURCE_DIR Lib)
@@ -271,20 +278,68 @@ endif()
 
 set (PYTHON_CMD ${PYTHON_EXECUTABLE})
 
+# Define macro used for building vkxml generated files
+macro(run_vk_xml_generate dependency output)
+    add_custom_command(OUTPUT ${output}
+    COMMAND ${PYTHON_CMD} ${SCRIPTS_DIR}/lvl_genvk.py -registry ${SCRIPTS_DIR}/vk.xml ${output}
+    DEPENDS ${SCRIPTS_DIR}/vk.xml ${SCRIPTS_DIR}/generator.py ${SCRIPTS_DIR}/${dependency} ${SCRIPTS_DIR}/lvl_genvk.py ${SCRIPTS_DIR}/reg.py
+    )
+endmacro()
+
+# Custom target for generated vulkan helper file dependencies
+add_custom_target(generate_helper_files DEPENDS
+    vk_enum_string_helper.h
+    vk_struct_size_helper.h
+    vk_struct_size_helper.c
+    vk_safe_struct.h
+    vk_safe_struct.cpp
+    vk_object_types.h
+    vk_layer_dispatch_table.h
+    vk_dispatch_table_helper.h
+    vk_extension_helper.h
+    )
+
+# Rules to build generated helper files
+run_vk_xml_generate(loader_extension_generator.py vk_layer_dispatch_table.h)
+run_vk_xml_generate(dispatch_table_helper_generator.py vk_dispatch_table_helper.h)
+run_vk_xml_generate(helper_file_generator.py vk_safe_struct.h)
+run_vk_xml_generate(helper_file_generator.py vk_safe_struct.cpp)
+run_vk_xml_generate(helper_file_generator.py vk_struct_size_helper.h)
+run_vk_xml_generate(helper_file_generator.py vk_struct_size_helper.c)
+run_vk_xml_generate(helper_file_generator.py vk_enum_string_helper.h)
+run_vk_xml_generate(helper_file_generator.py vk_object_types.h)
+run_vk_xml_generate(helper_file_generator.py vk_extension_helper.h)
+
 if(NOT WIN32)
     include(GNUInstallDirs)
-    add_definitions(-DSYSCONFDIR="${CMAKE_INSTALL_SYSCONFDIR}")
-    add_definitions(-DDATADIR="${CMAKE_INSTALL_DATADIR}")
-    if (CMAKE_INSTALL_PREFIX STREQUAL "/usr/local")
-    elseif (CMAKE_INSTALL_PREFIX STREQUAL "")
-    else()
-        add_definitions(-DLOCALPREFIX="${CMAKE_INSTALL_PREFIX}")
+
+    add_definitions(-DFALLBACK_CONFIG_DIRS="${FALLBACK_CONFIG_DIRS}")
+    add_definitions(-DFALLBACK_DATA_DIRS="${FALLBACK_DATA_DIRS}")
+    add_definitions(-DSYSCONFDIR="${CMAKE_INSTALL_FULL_SYSCONFDIR}")
+
+    # Make sure /etc is searched by the loader
+    if(NOT (CMAKE_INSTALL_FULL_SYSCONFDIR STREQUAL "/etc"))
+        add_definitions(-DEXTRASYSCONFDIR="/etc")
     endif()
 endif()
 
 if(UNIX)
-    install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/vulkan" DESTINATION include)
+    if(INSTALL_LVL_FILES)
+        install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/vulkan" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+        install(FILES "${CMAKE_CURRENT_BINARY_DIR}/vk_layer_dispatch_table.h" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/vulkan")
+    endif()
+
+# uninstall target
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cmake_uninstall.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
+    IMMEDIATE @ONLY)
+
+add_custom_target(uninstall
+    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake)
 endif()
+
+add_definitions(-DAPI_NAME="${API_NAME}")
 
 # loader: Generic VULKAN ICD loader
 # tests: VULKAN tests
