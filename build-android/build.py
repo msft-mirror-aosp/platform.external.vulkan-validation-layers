@@ -137,13 +137,7 @@ def main():
   shaderc_path = installdir + '/shaderc/android_test'
   print('shaderc_path = %s' % shaderc_path)
 
-  if os.path.isdir('/buildbot/android-ndk'):
-    ndk_dir = '/buildbot/android-ndk'
-  elif os.path.isdir(os.environ['NDK_PATH']):
-    ndk_dir = os.environ['NDK_PATH'];
-  else:
-    print('Error: No NDK environment found')
-    return
+  ndk_dir = os.path.join(THIS_DIR, '../../../prebuilts/toolchain')
 
   ndk_build = os.path.join(ndk_dir, 'ndk-build')
   platforms_root = os.path.join(ndk_dir, 'platforms')
