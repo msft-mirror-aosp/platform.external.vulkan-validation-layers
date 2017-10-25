@@ -4,6 +4,10 @@ cc_library_static {
     srcs: [
         "cJSON.c",
     ],
+    cflags: [
+        "-Wall",
+        "-Werror",
+    ],
     local_include_dirs: [
         "includes",
     ],
@@ -17,6 +21,10 @@ cc_library_static {
     clang: true,
     srcs: [
         "cJSON.c",
+    ],
+    cflags: [
+        "-Wall",
+        "-Werror",
     ],
     local_include_dirs: [
         "includes",
