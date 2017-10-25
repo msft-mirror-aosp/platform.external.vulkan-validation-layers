@@ -164,8 +164,9 @@ LOCAL_MODULE := vkjson
 LOCAL_SRC_FILES += $(SRC_DIR)/libs/vkjson/vkjson.cc \
                    $(SRC_DIR)/libs/vkjson/vkjson_instance.cc \
                    $(SRC_DIR)/common/vulkan_wrapper.cpp \
-                   $(SRC_DIR)/loader/cJSON.c
+                   $(SRC_DIR)/libs/cjson/cJSON.c
 LOCAL_C_INCLUDES += $(LOCAL_PATH)/$(SRC_DIR)/include \
+                    $(LOCAL_PATH)/$(SRC_DIR)/libs/cjson/includes \
                     $(LOCAL_PATH)/$(SRC_DIR)/loader
 
 LOCAL_CPPFLAGS += -std=c++11 -DVK_PROTOTYPES -Wall -Werror -Wno-unused-function -Wno-unused-const-variable -mxgot
