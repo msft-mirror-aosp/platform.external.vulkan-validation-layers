@@ -4,6 +4,10 @@ cc_library_static {
         "vkjson.cc",
         "vkjson_instance.cc",
     ],
+    cflags: [
+        "-Wall",
+        "-Werror",
+    ],
     cppflags: [
         "-std=c++11",
         "-Wno-sign-compare",
@@ -25,6 +29,10 @@ cc_library_static {
     srcs: [
         "vkjson.cc",
         "vkjson_instance.cc",
+    ],
+    cflags: [
+        "-Wall",
+        "-Werror",
     ],
     cppflags: [
         "-std=c++11",
