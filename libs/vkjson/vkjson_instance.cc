@@ -24,6 +24,7 @@
 
 #include "vkjson.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace {
