@@ -1,26 +1,3 @@
-cc_library_headers {
-    name: "vk_headers",
-    clang: true,
-    local_include_dirs: [
-        "include",
-    ],
-    export_include_dirs: [
-        "include",
-    ],
-}
-
-cc_library_headers {
-    name: "vk_headers_ndk",
-    clang: true,
-    local_include_dirs: [
-        "include",
-    ],
-    export_include_dirs: [
-        "include",
-    ],
-    sdk_version: "24",
-}
-
 subdirs = [
     "libs/cjson",
     "libs/vkjson",
