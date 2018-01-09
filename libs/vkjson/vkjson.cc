@@ -54,9 +54,30 @@ template <> struct EnumTraits<VkPhysicalDeviceType> {
 
 template <> struct EnumTraits<VkFormat> {
   static uint32_t min() { return VK_FORMAT_BEGIN_RANGE; }
-  static uint32_t max() { return VK_FORMAT_END_RANGE; }
+  static uint32_t max() { return VK_FORMAT_G16_B16_R16_3PLANE_444_UNORM; }
 };
 
+template <>
+struct EnumTraits<VkPointClippingBehavior> {
+  static uint32_t min() { return VK_POINT_CLIPPING_BEHAVIOR_BEGIN_RANGE; }
+  static uint32_t max() { return VK_POINT_CLIPPING_BEHAVIOR_END_RANGE; }
+};
+
+template <>
+struct EnumTraits<VkExternalFenceHandleTypeFlagBits> {
+  static uint32_t min() { return VK_EXTERNAL_FENCE_HANDLE_TYPE_OPAQUE_FD_BIT; }
+  static uint32_t max() { return VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT; }
+};
+
+template <>
+struct EnumTraits<VkExternalSemaphoreHandleTypeFlagBits> {
+  static uint32_t min() {
+    return VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
+  }
+  static uint32_t max() {
+    return VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
+  }
+};
 
 // VkSparseImageFormatProperties
 
@@ -307,6 +328,116 @@ inline bool Iterate(Visitor* visitor, VkPhysicalDeviceMemoryProperties* properti
 }
 
 template <typename Visitor>
+inline bool Iterate(Visitor* visitor,
+                    VkPhysicalDeviceSubgroupProperties* properties) {
+  return visitor->Visit("subgroupSize", &properties->subgroupSize) &&
+         visitor->Visit("supportedStages", &properties->supportedStages) &&
+         visitor->Visit("supportedOperations",
+                        &properties->supportedOperations) &&
+         visitor->Visit("quadOperationsInAllStages",
+                        &properties->quadOperationsInAllStages);
+}
+
+template <typename Visitor>
+inline bool Iterate(Visitor* visitor,
+                    VkPhysicalDevicePointClippingProperties* properties) {
+  return visitor->Visit("pointClippingBehavior",
+                        &properties->pointClippingBehavior);
+}
+
+template <typename Visitor>
+inline bool Iterate(Visitor* visitor,
+                    VkPhysicalDeviceMultiviewProperties* properties) {
+  return visitor->Visit("maxMultiviewViewCount",
+                        &properties->maxMultiviewViewCount) &&
+         visitor->Visit("maxMultiviewInstanceIndex",
+                        &properties->maxMultiviewInstanceIndex);
+}
+
+template <typename Visitor>
+inline bool Iterate(Visitor* visitor,
+                    VkPhysicalDeviceIDProperties* properties) {
+  return visitor->Visit("deviceUUID", &properties->deviceUUID) &&
+         visitor->Visit("driverUUID", &properties->driverUUID) &&
+         visitor->Visit("deviceLUID", &properties->deviceLUID) &&
+         visitor->Visit("deviceNodeMask", &properties->deviceNodeMask) &&
+         visitor->Visit("deviceLUIDValid", &properties->deviceLUIDValid);
+}
+
+template <typename Visitor>
+inline bool Iterate(Visitor* visitor,
+                    VkPhysicalDeviceMaintenance3Properties* properties) {
+  return visitor->Visit("maxPerSetDescriptors",
+                        &properties->maxPerSetDescriptors) &&
+         visitor->Visit("maxMemoryAllocationSize",
+                        &properties->maxMemoryAllocationSize);
+}
+
+template <typename Visitor>
+inline bool Iterate(Visitor* visitor,
+                    VkPhysicalDevice16BitStorageFeatures* features) {
+  return visitor->Visit("storageBuffer16BitAccess",
+                        &features->storageBuffer16BitAccess) &&
+         visitor->Visit("uniformAndStorageBuffer16BitAccess",
+                        &features->uniformAndStorageBuffer16BitAccess) &&
+         visitor->Visit("storagePushConstant16",
+                        &features->storagePushConstant16) &&
+         visitor->Visit("storageInputOutput16",
+                        &features->storageInputOutput16);
+}
+
+template <typename Visitor>
+inline bool Iterate(Visitor* visitor,
+                    VkPhysicalDeviceMultiviewFeatures* features) {
+  return visitor->Visit("multiview", &features->multiview) &&
+         visitor->Visit("multiviewGeometryShader",
+                        &features->multiviewGeometryShader) &&
+         visitor->Visit("multiviewTessellationShader",
+                        &features->multiviewTessellationShader);
+}
+
+template <typename Visitor>
+inline bool Iterate(Visitor* visitor,
+                    VkPhysicalDeviceProtectedMemoryFeatures* features) {
+  return visitor->Visit("protectedMemory", &features->protectedMemory);
+}
+
+template <typename Visitor>
+inline bool Iterate(Visitor* visitor,
+                    VkPhysicalDeviceSamplerYcbcrConversionFeatures* features) {
+  return visitor->Visit("samplerYcbcrConversion",
+                        &features->samplerYcbcrConversion);
+}
+
+template <typename Visitor>
+inline bool Iterate(Visitor* visitor,
+                    VkPhysicalDeviceShaderDrawParameterFeatures* features) {
+  return visitor->Visit("shaderDrawParameters",
+                        &features->shaderDrawParameters);
+}
+
+template <typename Visitor>
+inline bool Iterate(Visitor* visitor, VkExternalFenceProperties* properties) {
+  return visitor->Visit("exportFromImportedHandleTypes",
+                        &properties->exportFromImportedHandleTypes) &&
+         visitor->Visit("compatibleHandleTypes",
+                        &properties->compatibleHandleTypes) &&
+         visitor->Visit("externalFenceFeatures",
+                        &properties->externalFenceFeatures);
+}
+
+template <typename Visitor>
+inline bool Iterate(Visitor* visitor,
+                    VkExternalSemaphoreProperties* properties) {
+  return visitor->Visit("exportFromImportedHandleTypes",
+                        &properties->exportFromImportedHandleTypes) &&
+         visitor->Visit("compatibleHandleTypes",
+                        &properties->compatibleHandleTypes) &&
+         visitor->Visit("externalSemaphoreFeatures",
+                        &properties->externalSemaphoreFeatures);
+}
+
+template <typename Visitor>
 inline bool Iterate(Visitor* visitor, VkQueueFamilyProperties* properties) {
   return
     visitor->Visit("queueFlags", &properties->queueFlags) &&
@@ -346,23 +477,68 @@ inline bool Iterate(Visitor* visitor, VkJsonLayer* layer) {
 }
 
 template <typename Visitor>
+inline bool Iterate(Visitor* visitor, VkJsonDeviceGroup* device_group) {
+  return visitor->Visit("devices", &device_group->device_inds) &&
+         visitor->Visit("subsetAllocation",
+                        &device_group->properties.subsetAllocation);
+}
+
+template <typename Visitor>
 inline bool Iterate(Visitor* visitor, VkJsonDevice* device) {
-  return visitor->Visit("properties", &device->properties) &&
-         visitor->Visit("features", &device->features) &&
-         visitor->Visit("variablePointersFeaturesKHR",
-                        &device->variable_pointer_features) &&
-         visitor->Visit("memory", &device->memory) &&
-         visitor->Visit("queues", &device->queues) &&
-         visitor->Visit("extensions", &device->extensions) &&
-         visitor->Visit("layers", &device->layers) &&
-         visitor->Visit("formats", &device->formats);
+  bool ret = true;
+  switch (device->properties.apiVersion ^
+          VK_VERSION_PATCH(device->properties.apiVersion)) {
+    case VK_API_VERSION_1_1:
+      ret &=
+          visitor->Visit("subgroupProperties", &device->subgroup_properties) &&
+          visitor->Visit("pointClippingProperties",
+                         &device->point_clipping_properties) &&
+          visitor->Visit("multiviewProperties",
+                         &device->multiview_properties) &&
+          visitor->Visit("idProperties", &device->id_properties) &&
+          visitor->Visit("maintenance3Properties",
+                         &device->maintenance3_properties) &&
+          visitor->Visit("16bitStorageFeatures",
+                         &device->bit16_storage_features) &&
+          visitor->Visit("multiviewFeatures", &device->multiview_features) &&
+          visitor->Visit("variablePointerFeatures",
+                         &device->variable_pointer_features2) &&
+          visitor->Visit("protectedMemoryFeatures",
+                         &device->protected_memory_features) &&
+          visitor->Visit("samplerYcbcrConversionFeatures",
+                         &device->sampler_ycbcr_conversion_features) &&
+          visitor->Visit("shaderDrawParameterFeatures",
+                         &device->shader_draw_parameter_features) &&
+          visitor->Visit("externalFenceProperties",
+                         &device->external_fence_properties) &&
+          visitor->Visit("externalSemaphoreProperties",
+                         &device->external_semaphore_properties);
+    case VK_API_VERSION_1_0:
+      ret &= visitor->Visit("properties", &device->properties) &&
+             visitor->Visit("features", &device->features) &&
+             visitor->Visit("variablePointersFeaturesKHR",
+                            &device->variable_pointer_features) &&
+             visitor->Visit("memory", &device->memory) &&
+             visitor->Visit("queues", &device->queues) &&
+             visitor->Visit("extensions", &device->extensions) &&
+             visitor->Visit("layers", &device->layers) &&
+             visitor->Visit("formats", &device->formats);
+  }
+  return ret;
 }
 
 template <typename Visitor>
 inline bool Iterate(Visitor* visitor, VkJsonInstance* instance) {
-  return visitor->Visit("layers", &instance->layers) &&
-         visitor->Visit("extensions", &instance->extensions) &&
-         visitor->Visit("devices", &instance->devices);
+  bool ret = true;
+  switch (instance->api_version ^ VK_VERSION_PATCH(instance->api_version)) {
+    case VK_API_VERSION_1_1:
+      ret &= visitor->Visit("deviceGroups", &instance->device_groups);
+    case VK_API_VERSION_1_0:
+      ret &= visitor->Visit("layers", &instance->layers) &&
+             visitor->Visit("extensions", &instance->extensions) &&
+             visitor->Visit("devices", &instance->devices);
+  }
+  return ret;
 }
 
 template <typename T>
