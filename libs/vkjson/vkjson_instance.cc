@@ -81,8 +81,6 @@ VkJsonDevice VkJsonGetDevice(VkInstance instance,
             vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceFeatures2KHR"));
   }
 
-  // Only device extensions.
-  // TODO(piman): do we want to show layer extensions?
   uint32_t extension_count = 0;
   vkEnumerateDeviceExtensionProperties(physical_device, nullptr,
                                        &extension_count, nullptr);
@@ -109,10 +107,12 @@ VkJsonDevice VkJsonGetDevice(VkInstance instance,
         {}  // features
     };
     if (HasExtension("VK_KHR_variable_pointers", device.extensions)) {
-      device.variable_pointer_features.sType =
+      device.ext_variable_pointer_features.variable_pointer_features_khr.sType =
           VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTER_FEATURES_KHR;
-      device.variable_pointer_features.pNext = features.pNext;
-      features.pNext = &device.variable_pointer_features;
+      device.ext_variable_pointer_features.variable_pointer_features_khr.pNext =
+          features.pNext;
+      features.pNext =
+          &device.ext_variable_pointer_features.variable_pointer_features_khr;
     }
     vkpGetPhysicalDeviceFeatures2KHR(physical_device, &features);
     device.features = features.features;
@@ -208,10 +208,10 @@ VkJsonDevice VkJsonGetDevice(VkInstance instance,
       device.multiview_features.pNext = features2.pNext;
       features2.pNext = &device.multiview_features;
 
-      device.variable_pointer_features2.sType =
+      device.variable_pointer_features.sType =
           VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTER_FEATURES;
-      device.variable_pointer_features2.pNext = features2.pNext;
-      features2.pNext = &device.variable_pointer_features2;
+      device.variable_pointer_features.pNext = features2.pNext;
+      features2.pNext = &device.variable_pointer_features;
 
       device.protected_memory_features.sType =
           VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_FEATURES;
