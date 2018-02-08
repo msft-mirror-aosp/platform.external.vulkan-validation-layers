@@ -23,29 +23,6 @@
 #ifndef CORE_VALIDATION_TYPES_H_
 #define CORE_VALIDATION_TYPES_H_
 
-#ifndef NOEXCEPT
-// Check for noexcept support
-#if defined(__clang__)
-#if __has_feature(cxx_noexcept)
-#define HAS_NOEXCEPT
-#endif
-#else
-#if defined(__GXX_EXPERIMENTAL_CXX0X__) && __GNUC__ * 10 + __GNUC_MINOR__ >= 46
-#define HAS_NOEXCEPT
-#else
-#if defined(_MSC_FULL_VER) && _MSC_FULL_VER >= 190023026 && defined(_HAS_EXCEPTIONS) && _HAS_EXCEPTIONS
-#define HAS_NOEXCEPT
-#endif
-#endif
-#endif
-
-#ifdef HAS_NOEXCEPT
-#define NOEXCEPT noexcept
-#else
-#define NOEXCEPT
-#endif
-#endif
-
 #include "vk_safe_struct.h"
 #include "vulkan/vulkan.h"
 #include "vk_validation_error_messages.h"
@@ -66,7 +43,7 @@
 namespace cvdescriptorset {
 class DescriptorSetLayout;
 class DescriptorSet;
-};
+}
 
 struct GLOBAL_CB_NODE;
 
@@ -93,8 +70,8 @@ class BASE_NODE {
 struct COMMAND_POOL_NODE : public BASE_NODE {
     VkCommandPoolCreateFlags createFlags;
     uint32_t queueFamilyIndex;
-    // TODO: why is this std::list?
-    std::list<VkCommandBuffer> commandBuffers;  // container of cmd buffers allocated from this pool
+    // Cmd buffers allocated from this pool
+    std::unordered_set<VkCommandBuffer> commandBuffers;
 };
 
 // Generic wrapper for vulkan objects
@@ -196,19 +173,28 @@ class BINDABLE : public BASE_NODE {
     //  There's more data for sparse bindings so need better long-term solution
     // TODO : Need to update solution to track all sparse binding data
     std::unordered_set<MEM_BINDING> sparse_bindings;
-    BINDABLE() : sparse(false), binding{}, requirements{}, memory_requirements_checked(false), sparse_bindings{} {};
-    // Return unordered set of memory objects that are bound
-    std::unordered_set<VkDeviceMemory> GetBoundMemory() {
-        std::unordered_set<VkDeviceMemory> mem_set;
+
+    std::unordered_set<VkDeviceMemory> bound_memory_set_;
+
+    BINDABLE()
+        : sparse(false), binding{}, requirements{}, memory_requirements_checked(false), sparse_bindings{}, bound_memory_set_{} {};
+
+    // Update the cached set of memory bindings.
+    // Code that changes binding.mem or sparse_bindings must call UpdateBoundMemorySet()
+    void UpdateBoundMemorySet() {
+        bound_memory_set_.clear();
         if (!sparse) {
-            mem_set.insert(binding.mem);
+            bound_memory_set_.insert(binding.mem);
         } else {
             for (auto sb : sparse_bindings) {
-                mem_set.insert(sb.mem);
+                bound_memory_set_.insert(sb.mem);
             }
         }
-        return mem_set;
     }
+
+    // Return unordered set of memory objects that are bound
+    // Instead of creating a set from scratch each query, return the cached one
+    const std::unordered_set<VkDeviceMemory> &GetBoundMemory() const { return bound_memory_set_; }
 };
 
 class BUFFER_STATE : public BINDABLE {
@@ -316,7 +302,7 @@ struct MEMORY_RANGE {
 // Data struct for tracking memory object
 struct DEVICE_MEM_INFO : public BASE_NODE {
     void *object;       // Dispatchable object used to create this memory (device of swapchain)
-    bool global_valid;  // If allocation is mapped, set to "true" to be picked up by subsequently bound ranges
+    bool global_valid;  // If allocation is mapped or external, set to "true" to be picked up by subsequently bound ranges
     VkDeviceMemory mem;
     VkMemoryAllocateInfo alloc_info;
     std::unordered_set<VK_OBJECT> obj_bindings;               // objects bound to this memory
@@ -385,61 +371,71 @@ struct RENDER_PASS_STATE : public BASE_NODE {
     RENDER_PASS_STATE(VkRenderPassCreateInfo const *pCreateInfo) : createInfo(pCreateInfo) {}
 };
 
-// Cmd Buffer Tracking
+// vkCmd tracking -- complete as of header 1.0.68
+// please keep in "none, then sorted" order
+// Note: grepping vulkan.h for VKAPI_CALL.*vkCmd will return all functions except vkEndCommandBuffer
+
 enum CMD_TYPE {
     CMD_NONE,
-    CMD_BINDPIPELINE,
-    CMD_BINDPIPELINEDELTA,
-    CMD_SETVIEWPORTSTATE,
-    CMD_SETSCISSORSTATE,
-    CMD_SETLINEWIDTHSTATE,
-    CMD_SETDEPTHBIASSTATE,
-    CMD_SETBLENDSTATE,
-    CMD_SETDEPTHBOUNDSSTATE,
-    CMD_SETSTENCILREADMASKSTATE,
-    CMD_SETSTENCILWRITEMASKSTATE,
-    CMD_SETSTENCILREFERENCESTATE,
+    CMD_BEGINQUERY,
+    CMD_BEGINRENDERPASS,
     CMD_BINDDESCRIPTORSETS,
     CMD_BINDINDEXBUFFER,
-    CMD_BINDVERTEXBUFFER,
+    CMD_BINDPIPELINE,
+    CMD_BINDVERTEXBUFFERS,
+    CMD_BLITIMAGE,
+    CMD_CLEARATTACHMENTS,
+    CMD_CLEARCOLORIMAGE,
+    CMD_CLEARDEPTHSTENCILIMAGE,
+    CMD_COPYBUFFER,
+    CMD_COPYBUFFERTOIMAGE,
+    CMD_COPYIMAGE,
+    CMD_COPYIMAGETOBUFFER,
+    CMD_COPYQUERYPOOLRESULTS,
+    CMD_DEBUGMARKERBEGINEXT,
+    CMD_DEBUGMARKERENDEXT,
+    CMD_DEBUGMARKERINSERTEXT,
+    CMD_DISPATCH,
+    CMD_DISPATCHBASEKHX,
+    CMD_DISPATCHINDIRECT,
     CMD_DRAW,
     CMD_DRAWINDEXED,
-    CMD_DRAWINDIRECT,
-    CMD_DRAWINDIRECTCOUNTAMD,
     CMD_DRAWINDEXEDINDIRECT,
     CMD_DRAWINDEXEDINDIRECTCOUNTAMD,
-    CMD_DISPATCH,
-    CMD_DISPATCHINDIRECT,
-    CMD_COPYBUFFER,
-    CMD_COPYIMAGE,
-    CMD_BLITIMAGE,
-    CMD_COPYBUFFERTOIMAGE,
-    CMD_COPYIMAGETOBUFFER,
-    CMD_CLONEIMAGEDATA,
-    CMD_UPDATEBUFFER,
-    CMD_FILLBUFFER,
-    CMD_CLEARCOLORIMAGE,
-    CMD_CLEARATTACHMENTS,
-    CMD_CLEARDEPTHSTENCILIMAGE,
-    CMD_RESOLVEIMAGE,
-    CMD_SETEVENT,
-    CMD_RESETEVENT,
-    CMD_WAITEVENTS,
-    CMD_PIPELINEBARRIER,
-    CMD_BEGINQUERY,
+    CMD_DRAWINDIRECT,
+    CMD_DRAWINDIRECTCOUNTAMD,
+    CMD_ENDCOMMANDBUFFER,  // Should be the last command in any RECORDED cmd buffer
     CMD_ENDQUERY,
-    CMD_RESETQUERYPOOL,
-    CMD_COPYQUERYPOOLRESULTS,
-    CMD_WRITETIMESTAMP,
-    CMD_PUSHCONSTANTS,
-    CMD_INITATOMICCOUNTERS,
-    CMD_LOADATOMICCOUNTERS,
-    CMD_SAVEATOMICCOUNTERS,
-    CMD_BEGINRENDERPASS,
-    CMD_NEXTSUBPASS,
     CMD_ENDRENDERPASS,
     CMD_EXECUTECOMMANDS,
-    CMD_END,  // Should be last command in any RECORDED cmd buffer
+    CMD_FILLBUFFER,
+    CMD_NEXTSUBPASS,
+    CMD_PIPELINEBARRIER,
+    CMD_PROCESSCOMMANDSNVX,
+    CMD_PUSHCONSTANTS,
+    CMD_PUSHDESCRIPTORSETKHR,
+    CMD_PUSHDESCRIPTORSETWITHTEMPLATEKHR,
+    CMD_RESERVESPACEFORCOMMANDSNVX,
+    CMD_RESETEVENT,
+    CMD_RESETQUERYPOOL,
+    CMD_RESOLVEIMAGE,
+    CMD_SETBLENDCONSTANTS,
+    CMD_SETDEPTHBIAS,
+    CMD_SETDEPTHBOUNDS,
+    CMD_SETDEVICEMASKKHX,
+    CMD_SETDISCARDRECTANGLEEXT,
+    CMD_SETEVENT,
+    CMD_SETLINEWIDTH,
+    CMD_SETSAMPLELOCATIONSEXT,
+    CMD_SETSCISSOR,
+    CMD_SETSTENCILCOMPAREMASK,
+    CMD_SETSTENCILREFERENCE,
+    CMD_SETSTENCILWRITEMASK,
+    CMD_SETVIEWPORT,
+    CMD_SETVIEWPORTWSCALINGNV,
+    CMD_UPDATEBUFFER,
+    CMD_WAITEVENTS,
+    CMD_WRITETIMESTAMP,
 };
 
 enum CB_STATE {
@@ -559,8 +555,6 @@ class PIPELINE_STATE : public BASE_NODE {
     std::vector<VkVertexInputBindingDescription> vertexBindingDescriptions;
     std::vector<VkPipelineColorBlendAttachmentState> attachments;
     bool blendConstantsEnabled;  // Blend constants enabled for any attachments
-    // Store RPCI b/c renderPass may be destroyed after Pipeline creation
-    safe_VkRenderPassCreateInfo render_pass_ci;
     PIPELINE_LAYOUT_NODE pipeline_layout;
 
     // Default constructor
@@ -575,11 +569,26 @@ class PIPELINE_STATE : public BASE_NODE {
           vertexBindingDescriptions(),
           attachments(),
           blendConstantsEnabled(false),
-          render_pass_ci(),
           pipeline_layout() {}
 
     void initGraphicsPipeline(const VkGraphicsPipelineCreateInfo *pCreateInfo, std::shared_ptr<RENDER_PASS_STATE> &&rpstate) {
-        graphicsPipelineCI.initialize(pCreateInfo);
+        bool uses_color_attachment = false;
+        bool uses_depthstencil_attachment = false;
+        if (pCreateInfo->subpass < rpstate->createInfo.subpassCount) {
+            const auto &subpass = rpstate->createInfo.pSubpasses[pCreateInfo->subpass];
+
+            for (uint32_t i = 0; i < subpass.colorAttachmentCount; ++i) {
+                if (subpass.pColorAttachments[i].attachment != VK_ATTACHMENT_UNUSED) {
+                    uses_color_attachment = true;
+                    break;
+                }
+            }
+
+            if (subpass.pDepthStencilAttachment && subpass.pDepthStencilAttachment->attachment != VK_ATTACHMENT_UNUSED) {
+                uses_depthstencil_attachment = true;
+            }
+        }
+        graphicsPipelineCI.initialize(pCreateInfo, uses_color_attachment, uses_depthstencil_attachment);
         // Make sure compute pipeline is null
         VkComputePipelineCreateInfo emptyComputeCI = {};
         computePipelineCI.initialize(&emptyComputeCI);
@@ -588,15 +597,15 @@ class PIPELINE_STATE : public BASE_NODE {
             this->duplicate_shaders |= this->active_shaders & pPSSCI->stage;
             this->active_shaders |= pPSSCI->stage;
         }
-        if (pCreateInfo->pVertexInputState) {
-            const VkPipelineVertexInputStateCreateInfo *pVICI = pCreateInfo->pVertexInputState;
+        if (graphicsPipelineCI.pVertexInputState) {
+            const auto pVICI = graphicsPipelineCI.pVertexInputState;
             if (pVICI->vertexBindingDescriptionCount) {
                 this->vertexBindingDescriptions = std::vector<VkVertexInputBindingDescription>(
                     pVICI->pVertexBindingDescriptions, pVICI->pVertexBindingDescriptions + pVICI->vertexBindingDescriptionCount);
             }
         }
-        if (pCreateInfo->pColorBlendState) {
-            const VkPipelineColorBlendStateCreateInfo *pCBCI = pCreateInfo->pColorBlendState;
+        if (graphicsPipelineCI.pColorBlendState) {
+            const auto pCBCI = graphicsPipelineCI.pColorBlendState;
             if (pCBCI->attachmentCount) {
                 this->attachments = std::vector<VkPipelineColorBlendAttachmentState>(pCBCI->pAttachments,
                                                                                      pCBCI->pAttachments + pCBCI->attachmentCount);
@@ -609,7 +618,7 @@ class PIPELINE_STATE : public BASE_NODE {
         computePipelineCI.initialize(pCreateInfo);
         // Make sure gfx pipeline is null
         VkGraphicsPipelineCreateInfo emptyGraphicsCI = {};
-        graphicsPipelineCI.initialize(&emptyGraphicsCI);
+        graphicsPipelineCI.initialize(&emptyGraphicsCI, false, false);
         switch (computePipelineCI.stage.stage) {
             case VK_SHADER_STAGE_COMPUTE_BIT:
                 this->active_shaders |= VK_SHADER_STAGE_COMPUTE_BIT;
@@ -628,7 +637,7 @@ struct LAST_BOUND_STATE {
     // Track each set that has been bound
     // Ordered bound set tracking where index is set# that given set is bound to
     std::vector<cvdescriptorset::DescriptorSet *> boundDescriptorSets;
-    std::vector<std::unique_ptr<cvdescriptorset::DescriptorSet>> push_descriptors;
+    std::unique_ptr<cvdescriptorset::DescriptorSet> push_descriptor_set;
     // one dynamic offset per dynamic descriptor bound to this CB
     std::vector<std::vector<uint32_t>> dynamicOffsets;
 
@@ -636,7 +645,7 @@ struct LAST_BOUND_STATE {
         pipeline_state = nullptr;
         pipeline_layout.reset();
         boundDescriptorSets.clear();
-        push_descriptors.clear();
+        push_descriptor_set = nullptr;
         dynamicOffsets.clear();
     }
 };
@@ -650,6 +659,8 @@ struct GLOBAL_CB_NODE : public BASE_NODE {
     bool hasDrawCmd;
     CB_STATE state;                      // Track cmd buffer update state
     uint64_t submitCount;                // Number of times CB has been submitted
+    typedef uint64_t ImageLayoutUpdateCount;
+    ImageLayoutUpdateCount image_layout_change_count;  // The sequence number for changes to image layout (for cached validation)
     CBStatusFlags status;                // Track status of various bindings on cmd buffer
     CBStatusFlags static_status;         // All state bits provided by current graphics pipeline
                                          // rather than dynamic state
@@ -698,6 +709,7 @@ struct GLOBAL_CB_NODE : public BASE_NODE {
     std::unordered_set<VkDeviceMemory> memObjs;
     std::vector<std::function<bool(VkQueue)>> eventUpdates;
     std::vector<std::function<bool(VkQueue)>> queryUpdates;
+    std::unordered_set<cvdescriptorset::DescriptorSet *> validated_descriptor_sets;
 };
 
 struct SEMAPHORE_WAIT {
@@ -708,12 +720,18 @@ struct SEMAPHORE_WAIT {
 
 struct CB_SUBMISSION {
     CB_SUBMISSION(std::vector<VkCommandBuffer> const &cbs, std::vector<SEMAPHORE_WAIT> const &waitSemaphores,
-                  std::vector<VkSemaphore> const &signalSemaphores, VkFence fence)
-        : cbs(cbs), waitSemaphores(waitSemaphores), signalSemaphores(signalSemaphores), fence(fence) {}
+                  std::vector<VkSemaphore> const &signalSemaphores, std::vector<VkSemaphore> const &externalSemaphores,
+                  VkFence fence)
+        : cbs(cbs),
+          waitSemaphores(waitSemaphores),
+          signalSemaphores(signalSemaphores),
+          externalSemaphores(externalSemaphores),
+          fence(fence) {}
 
     std::vector<VkCommandBuffer> cbs;
     std::vector<SEMAPHORE_WAIT> waitSemaphores;
     std::vector<VkSemaphore> signalSemaphores;
+    std::vector<VkSemaphore> externalSemaphores;
     VkFence fence;
 };
 
@@ -830,14 +848,12 @@ bool rangesIntersect(layer_data const *dev_data, MEMORY_RANGE const *range1, VkD
 bool ValidateBufferMemoryIsValid(layer_data *dev_data, BUFFER_STATE *buffer_state, const char *functionName);
 void SetBufferMemoryValid(layer_data *dev_data, BUFFER_STATE *buffer_state, bool valid);
 bool ValidateCmdSubpassState(const layer_data *dev_data, const GLOBAL_CB_NODE *pCB, const CMD_TYPE cmd_type);
-
-
+bool ValidateCmd(layer_data *dev_data, const GLOBAL_CB_NODE *cb_state, const CMD_TYPE cmd, const char *caller_name);
 
 // Prototypes for layer_data accessor functions.  These should be in their own header file at some point
 VkFormatProperties GetFormatProperties(core_validation::layer_data *device_data, VkFormat format);
-VkImageFormatProperties GetImageFormatProperties(core_validation::layer_data *device_data, VkFormat format,
-                                                        VkImageType image_type, VkImageTiling tiling, VkImageUsageFlags usage,
-                                                        VkImageCreateFlags flags);
+VkResult GetImageFormatProperties(core_validation::layer_data *device_data, const VkImageCreateInfo *image_ci,
+                                  VkImageFormatProperties *image_format_properties);
 const debug_report_data *GetReportData(const layer_data *);
 const VkPhysicalDeviceProperties *GetPhysicalDeviceProperties(layer_data *);
 const CHECK_DISABLED *GetDisables(layer_data *);
