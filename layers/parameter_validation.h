@@ -24,8 +24,10 @@
 #include <algorithm>
 #include <cstdlib>
 #include <string>
+#include <sstream>
 #include <bitset>
 #include <mutex>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "vulkan/vulkan.h"
@@ -79,6 +81,13 @@ struct layer_data {
     VkPhysicalDevice physical_device = VK_NULL_HANDLE;
     VkDevice device = VK_NULL_HANDLE;
     DeviceExtensions extensions;
+
+    struct SubpassesUsageStates {
+        std::unordered_set<uint32_t> subpasses_using_color_attachment;
+        std::unordered_set<uint32_t> subpasses_using_depthstencil_attachment;
+    };
+
+    std::unordered_map<VkRenderPass, SubpassesUsageStates> renderpasses_states;
 
     VkLayerDispatchTable dispatch_table = {};
 };
@@ -134,6 +143,14 @@ const uint32_t ExtEnumBaseValue = 1000000000;
 // The value of all VK_xxx_MAX_ENUM tokens
 const uint32_t MaxEnumValue = 0x7FFFFFFF;
 
+// Misc parameters of log_msg that are likely constant per command (or low frequency change)
+struct LogMiscParams {
+    const debug_report_data *debug_data;
+    VkDebugReportObjectTypeEXT objectType;
+    uint64_t srcObject;
+    const char *pLayerPrefix;
+    const char *api_name;
+};
 
 /**
 * Validate a minimum value.
@@ -148,19 +165,26 @@ const uint32_t MaxEnumValue = 0x7FFFFFFF;
 * @return Boolean value indicating that the call should be skipped.
 */
 template <typename T>
-bool ValidateGreaterThan(debug_report_data *report_data, const char *api_name, const ParameterName &parameter_name, T value,
-                         T lower_bound) {
+bool ValidateGreaterThan(const T value, const T lower_bound, const ParameterName &parameter_name,
+                         const UNIQUE_VALIDATION_ERROR_CODE vuid, const LogMiscParams &misc) {
     bool skip_call = false;
 
     if (value <= lower_bound) {
-        skip_call |=
-            log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT, 0, __LINE__, 1, LayerName,
-                    "%s: parameter %s must be greater than %d", api_name, parameter_name.get_name().c_str(), lower_bound);
+        std::ostringstream ss;
+        ss << misc.api_name << ": parameter " << parameter_name.get_name() << " (= " << value << ") is greater than " << lower_bound
+           << ". " << validation_error_map[vuid];
+        skip_call |= log_msg(misc.debug_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, misc.objectType, misc.srcObject, __LINE__, vuid,
+                             misc.pLayerPrefix, "%s", ss.str().c_str());
     }
 
     return skip_call;
 }
 
+template <typename T>
+bool ValidateGreaterThanZero(const T value, const ParameterName &parameter_name, const UNIQUE_VALIDATION_ERROR_CODE vuid,
+                             const LogMiscParams &misc) {
+    return ValidateGreaterThan(value, T{0}, parameter_name, vuid, misc);
+}
 /**
  * Validate a required pointer.
  *
