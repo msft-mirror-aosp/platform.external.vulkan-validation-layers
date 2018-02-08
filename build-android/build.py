@@ -150,7 +150,7 @@ def main():
   print('platforms_root: %s' % platforms_root)
 
   compiler = 'clang'
-  stl = 'gnustl_static'
+  stl = 'c++_static'
   obj_out = os.path.join(THIS_DIR, stl, 'obj')
   lib_out = os.path.join(THIS_DIR, 'jniLibs')
 
