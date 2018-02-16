@@ -149,6 +149,12 @@ if (WIN32)
         endif()
     endforeach()
 
+    if (ENABLE_WIN10_ONECORE)
+    # Note  When linking your app or driver to OneCore.lib, be sure to remove any links to non-umbrella libs (such as kernel32.lib). 
+        set(CMAKE_CXX_STANDARD_LIBRARIES " ") # space is intentional
+        set(CMAKE_C_STANDARD_LIBRARIES ${CMAKE_CXX_STANDARD_LIBRARIES})
+    endif()
+
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D_CRT_SECURE_NO_WARNINGS")
     # Build dev_ext_trampoline.c with -O2 to allow tail-call optimization.
     # Build other C files with normal options
@@ -180,10 +186,16 @@ if (WIN32)
     # Suppress conflicting libs warning for debug builds.
     set_target_properties(${API_LOWERCASE}-${MAJOR} PROPERTIES LINK_FLAGS_DEBUG /ignore:4098)
     set_target_properties(VKstatic.${MAJOR} PROPERTIES OUTPUT_NAME VKstatic.${MAJOR})
-    target_link_libraries(${API_LOWERCASE}-${MAJOR} shlwapi Cfgmgr32)
+
+    if (ENABLE_WIN10_ONECORE)
+        target_link_libraries(${API_LOWERCASE}-${MAJOR} OneCoreUAP.lib LIBCMT.LIB LIBCMTD.LIB LIBVCRUNTIME.LIB LIBUCRT.LIB)
+        set_target_properties(${API_LOWERCASE}-${MAJOR} PROPERTIES LINK_FLAGS   "/NODEFAULTLIB")
+    else()
+        target_link_libraries(${API_LOWERCASE}-${MAJOR} Cfgmgr32)
+    endif()
+
     add_dependencies(${API_LOWERCASE}-${MAJOR} generate_helper_files loader_gen_files loader_asm_gen_files)
 
-    target_link_libraries(VKstatic.${MAJOR} shlwapi)
     if (CMAKE_GENERATOR MATCHES "^Visual Studio.*")
         file(TO_NATIVE_PATH ${CMAKE_CURRENT_BINARY_DIR}/$<CONFIGURATION>/${API_LOWERCASE}-${MAJOR}.dll COPY_SRC_PATH)
         file(TO_NATIVE_PATH ${CMAKE_CURRENT_BINARY_DIR}/../demos/$<CONFIGURATION>/ COPY_DST_PATH)
