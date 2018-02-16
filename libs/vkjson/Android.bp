@@ -12,6 +12,11 @@ cc_library_static {
         "-std=c++11",
         "-Wno-sign-compare",
     ],
+    arch: {
+        arm: {
+            instruction_set: "arm",
+        },
+    },
     export_include_dirs: [
         ".",
     ],
