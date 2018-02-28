@@ -8,11 +8,6 @@ cc_library_static {
         "-Wall",
         "-Werror",
     ],
-    arch: {
-        arm: {
-            instruction_set: "arm",
-        },
-    },
     local_include_dirs: [
         "includes",
     ],
