@@ -44,10 +44,10 @@
 #include "vkrenderframework.h"
 #include "vk_typemap_helper.h"
 
-#include <limits.h>
-
 #include <algorithm>
+#include <cmath>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <unordered_set>
 
@@ -163,23 +163,21 @@ static VkSamplerCreateInfo SafeSaneSamplerCreateInfo() {
 template <typename T>
 struct AlwaysFalse : std::false_type {};
 
-// Template wrapper of cmath.h versions to avoid portability issues with std::nextafter
+// Helpers to get nearest greater or smaller value (of float) -- useful for testing the boundary cases of Vulkan limits
 template <typename T>
-T NextAfter(T from, T to) {
-    static_assert(AlwaysFalse<T>::value, "must specialize for each supported type");
+T NearestGreater(const T from) {
+    using Lim = std::numeric_limits<T>;
+    const auto positive_direction = Lim::has_infinity ? Lim::infinity() : Lim::max();
+
+    return std::nextafter(from, positive_direction);
 }
-template <>
-float NextAfter(float from, float to) {
-    return nextafterf(from, to);
-}
-// lowest <= value <= max non intuitive, thus the named wrapper
+
 template <typename T>
-T NextAfterGreater(const T from) {
-    return NextAfter<T>(from, std::numeric_limits<T>::max());
-}
-template <typename T>
-T NextAfterLess(const T from) {
-    return NextAfter<T>(from, std::numeric_limits<T>::lowest());
+T NearestSmaller(const T from) {
+    using Lim = std::numeric_limits<T>;
+    const auto negative_direction = Lim::has_infinity ? -Lim::infinity() : Lim::lowest();
+
+    return std::nextafter(from, negative_direction);
 }
 
 // ErrorMonitor Usage:
@@ -1249,8 +1247,8 @@ TEST_F(VkLayerTest, RequiredParameter) {
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1e030a1b);
     // Specify 0 for a required array count
     // Expected to trigger an error with parameter_validation::validate_array
-    VkViewport view_port = {};
-    m_commandBuffer->SetViewport(0, 0, &view_port);
+    VkViewport viewport = {0.0f, 0.0f, 64.0f, 64.0f, 0.0f, 1.0f};
+    m_commandBuffer->SetViewport(0, 0, &viewport);
     m_errorMonitor->VerifyFound();
 
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1e03fa01);
@@ -1568,12 +1566,12 @@ TEST_F(VkLayerTest, AnisotropyFeatureEnabled) {
     };
 
     // maxAnisotropy out-of-bounds low.
-    sampler_info.maxAnisotropy = NextAfterLess(1.0F);
+    sampler_info.maxAnisotropy = NearestSmaller(1.0F);
     do_test(VALIDATION_ERROR_1260085e, &sampler_info);
     sampler_info.maxAnisotropy = sampler_info_ref.maxAnisotropy;
 
     // maxAnisotropy out-of-bounds high.
-    sampler_info.maxAnisotropy = NextAfterGreater(m_device->phy().properties().limits.maxSamplerAnisotropy);
+    sampler_info.maxAnisotropy = NearestGreater(m_device->phy().properties().limits.maxSamplerAnisotropy);
     do_test(VALIDATION_ERROR_1260085e, &sampler_info);
     sampler_info.maxAnisotropy = sampler_info_ref.maxAnisotropy;
 
@@ -4057,27 +4055,6 @@ TEST_F(VkLayerTest, DSImageTransferGranularityTests) {
     region.imageOffset.y = 0;
     region.imageOffset.z = 0;
 
-    // Introduce failure by setting bufferRowLength to a bad granularity value
-    region.bufferRowLength = 3;
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "queue family image transfer granularity");
-    vkCmdCopyBufferToImage(m_commandBuffer->handle(), buffer.handle(), srcImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-    m_errorMonitor->VerifyFound();
-    region.bufferRowLength = 128;
-
-    // Introduce failure by setting bufferOffset to a bad granularity value
-    region.bufferOffset = 3;
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "queue family image transfer granularity");
-    vkCmdCopyImageToBuffer(m_commandBuffer->handle(), srcImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, buffer.handle(), 1, &region);
-    m_errorMonitor->VerifyFound();
-    region.bufferOffset = 0;
-
-    // Introduce failure by setting bufferImageHeight to a bad granularity value
-    region.bufferImageHeight = 3;
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "queue family image transfer granularity");
-    vkCmdCopyImageToBuffer(m_commandBuffer->handle(), srcImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, buffer.handle(), 1, &region);
-    m_errorMonitor->VerifyFound();
-    region.bufferImageHeight = 128;
-
     // Introduce failure by setting imageExtent to a bad granularity value
     region.imageExtent.width = 3;
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "queue family image transfer granularity");
@@ -4208,8 +4185,8 @@ TEST_F(VkLayerTest, RenderPassPipelineSubpassMismatch) {
     pipe.AddDefaultColorAttachment();
     pipe.AddShader(&vs);
     pipe.AddShader(&fs);
-    VkViewport view_port = {};
-    m_viewports.push_back(view_port);
+    VkViewport viewport = {0.0f, 0.0f, 64.0f, 64.0f, 0.0f, 1.0f};
+    m_viewports.push_back(viewport);
     pipe.SetViewport(m_viewports);
     VkRect2D rect = {};
     m_scissors.push_back(rect);
@@ -6196,12 +6173,8 @@ TEST_F(VkLayerTest, CreatePipelineLayoutExcessPerStageDescriptors) {
     uint32_t sum_samplers = m_device->phy().properties().limits.maxDescriptorSetSamplers;
     uint32_t sum_input_attachments = m_device->phy().properties().limits.maxDescriptorSetInputAttachments;
 
-    uint32_t gfx_stages = 2;  // vtx, frag
-    gfx_stages += (m_device->phy().features().geometryShader ? 1 : 0);
-    gfx_stages += (m_device->phy().features().tessellationShader ? 2 : 0);
-
-    // Devices that report UINT_MAX for any of these limits can't run this test
-    if (UINT_MAX == std::max({max_uniform_buffers, max_storage_buffers, max_sampled_images, max_storage_images, max_samplers})) {
+    // Devices that report UINT32_MAX for any of these limits can't run this test
+    if (UINT32_MAX == std::max({max_uniform_buffers, max_storage_buffers, max_sampled_images, max_storage_images, max_samplers})) {
         printf("             Physical device limits report as 2^32-1. Skipping test.\n");
         return;
     }
@@ -6239,7 +6212,7 @@ TEST_F(VkLayerTest, CreatePipelineLayoutExcessPerStageDescriptors) {
     ASSERT_VK_SUCCESS(err);
 
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_0fe0023e);
-    if ((max_samplers * gfx_stages + max_combined) > sum_samplers) {
+    if ((max_samplers + max_combined) > sum_samplers) {
         m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
                                              VALIDATION_ERROR_0fe00d1a);  // expect all-stages sum too
     }
@@ -6257,7 +6230,7 @@ TEST_F(VkLayerTest, CreatePipelineLayoutExcessPerStageDescriptors) {
     dslb_vec.clear();
     dslb.binding = 0;
     dslb.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    dslb.descriptorCount = 1 + (max_uniform_buffers / 2);
+    dslb.descriptorCount = max_uniform_buffers + 1;
     dslb.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     dslb_vec.push_back(dslb);
     dslb.binding = 1;
@@ -6271,7 +6244,7 @@ TEST_F(VkLayerTest, CreatePipelineLayoutExcessPerStageDescriptors) {
     ASSERT_VK_SUCCESS(err);
 
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_0fe00240);
-    if ((2 * dslb.descriptorCount) > sum_uniform_buffers) {
+    if (dslb.descriptorCount > sum_uniform_buffers) {
         m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
                                              VALIDATION_ERROR_0fe00d1c);  // expect all-stages sum too
     }
@@ -6289,7 +6262,7 @@ TEST_F(VkLayerTest, CreatePipelineLayoutExcessPerStageDescriptors) {
     dslb_vec.clear();
     dslb.binding = 0;
     dslb.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    dslb.descriptorCount = 1 + (max_storage_buffers / 3);
+    dslb.descriptorCount = max_storage_buffers + 1;
     dslb.stageFlags = VK_SHADER_STAGE_ALL;
     dslb_vec.push_back(dslb);
     dslb.binding = 1;
@@ -6306,11 +6279,11 @@ TEST_F(VkLayerTest, CreatePipelineLayoutExcessPerStageDescriptors) {
     ASSERT_VK_SUCCESS(err);
 
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_0fe00242);
-    if (((gfx_stages + 1) * dslb.descriptorCount) > sum_dyn_storage_buffers) {
+    if (dslb.descriptorCount > sum_dyn_storage_buffers) {
         m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
                                              VALIDATION_ERROR_0fe00d22);  // expect all-stages sum too
     }
-    if (((gfx_stages + 2) * dslb.descriptorCount) > sum_storage_buffers) {
+    if (dslb.descriptorCount > sum_storage_buffers) {
         m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
                                              VALIDATION_ERROR_0fe00d20);  // expect all-stages sum too
     }
@@ -6324,7 +6297,7 @@ TEST_F(VkLayerTest, CreatePipelineLayoutExcessPerStageDescriptors) {
     dslb_vec.clear();
     dslb.binding = 0;
     dslb.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    dslb.descriptorCount = max_sampled_images / 2;
+    dslb.descriptorCount = max_sampled_images;
     dslb.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     dslb_vec.push_back(dslb);
     dslb.binding = 1;
@@ -6342,11 +6315,11 @@ TEST_F(VkLayerTest, CreatePipelineLayoutExcessPerStageDescriptors) {
     ASSERT_VK_SUCCESS(err);
 
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_0fe00244);
-    if (max_combined + ((gfx_stages + 2) * (max_sampled_images / 2)) > sum_sampled_images) {
+    if (max_combined + max_sampled_images > sum_sampled_images) {
         m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
                                              VALIDATION_ERROR_0fe00d24);  // expect all-stages sum too
     }
-    if ((gfx_stages * max_combined) > sum_samplers) {
+    if (max_combined > sum_samplers) {
         m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
                                              VALIDATION_ERROR_0fe00d1a);  // expect all-stages sum too
     }
@@ -6374,7 +6347,7 @@ TEST_F(VkLayerTest, CreatePipelineLayoutExcessPerStageDescriptors) {
     ASSERT_VK_SUCCESS(err);
 
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_0fe00246);
-    if ((4 * dslb.descriptorCount) > sum_storage_images) {
+    if (2 * dslb.descriptorCount > sum_storage_images) {
         m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
                                              VALIDATION_ERROR_0fe00d26);  // expect all-stages sum too
     }
@@ -6410,7 +6383,7 @@ TEST_F(VkLayerTest, CreatePipelineLayoutExcessPerStageDescriptors) {
 }
 
 TEST_F(VkLayerTest, CreatePipelineLayoutExcessDescriptorsOverall) {
-    TEST_DESCRIPTION("Attempt to create a pipeline layout where total descriptors summed over all stages exceed limits");
+    TEST_DESCRIPTION("Attempt to create a pipeline layout where total descriptors exceed limits");
 
     ASSERT_NO_FATAL_FAILURE(Init());
 
@@ -6430,9 +6403,9 @@ TEST_F(VkLayerTest, CreatePipelineLayoutExcessDescriptorsOverall) {
     uint32_t sum_samplers = m_device->phy().properties().limits.maxDescriptorSetSamplers;
     uint32_t sum_input_attachments = m_device->phy().properties().limits.maxDescriptorSetInputAttachments;
 
-    // Devices that report UINT_MAX for any of these limits can't run this test
-    if (UINT_MAX == std::max({sum_dyn_uniform_buffers, sum_uniform_buffers, sum_dyn_storage_buffers, sum_storage_buffers,
-                              sum_sampled_images, sum_storage_images, sum_samplers, sum_input_attachments})) {
+    // Devices that report UINT32_MAX for any of these limits can't run this test
+    if (UINT32_MAX == std::max({sum_dyn_uniform_buffers, sum_uniform_buffers, sum_dyn_storage_buffers, sum_storage_buffers,
+                                sum_sampled_images, sum_storage_images, sum_samplers, sum_input_attachments})) {
         printf("             Physical device limits report as 2^32-1. Skipping test.\n");
         return;
     }
@@ -6454,12 +6427,13 @@ TEST_F(VkLayerTest, CreatePipelineLayoutExcessDescriptorsOverall) {
     dslb_vec.clear();
     dslb.binding = 0;
     dslb.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-    dslb.descriptorCount = 1 + (sum_samplers / 2);
+    dslb.descriptorCount = sum_samplers / 2;
     dslb.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     dslb.pImmutableSamplers = NULL;
     dslb_vec.push_back(dslb);
     dslb.binding = 1;
     dslb.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    dslb.descriptorCount = sum_samplers - dslb.descriptorCount + 1;
     dslb.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     dslb_vec.push_back(dslb);
 
@@ -6483,7 +6457,7 @@ TEST_F(VkLayerTest, CreatePipelineLayoutExcessDescriptorsOverall) {
     dslb_vec.clear();
     dslb.binding = 0;
     dslb.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    dslb.descriptorCount = 1 + (sum_uniform_buffers / 2);
+    dslb.descriptorCount = sum_uniform_buffers + 1;
     dslb.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     dslb.pImmutableSamplers = NULL;
     dslb_vec.push_back(dslb);
@@ -6508,7 +6482,7 @@ TEST_F(VkLayerTest, CreatePipelineLayoutExcessDescriptorsOverall) {
     dslb_vec.clear();
     dslb.binding = 0;
     dslb.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-    dslb.descriptorCount = 1 + (sum_dyn_uniform_buffers / 2);
+    dslb.descriptorCount = sum_dyn_uniform_buffers + 1;
     dslb.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     dslb.pImmutableSamplers = NULL;
     dslb_vec.push_back(dslb);
@@ -6533,7 +6507,7 @@ TEST_F(VkLayerTest, CreatePipelineLayoutExcessDescriptorsOverall) {
     dslb_vec.clear();
     dslb.binding = 0;
     dslb.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    dslb.descriptorCount = 1 + (sum_storage_buffers / 2);
+    dslb.descriptorCount = sum_storage_buffers + 1;
     dslb.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     dslb.pImmutableSamplers = NULL;
     dslb_vec.push_back(dslb);
@@ -6558,7 +6532,7 @@ TEST_F(VkLayerTest, CreatePipelineLayoutExcessDescriptorsOverall) {
     dslb_vec.clear();
     dslb.binding = 0;
     dslb.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
-    dslb.descriptorCount = 1 + (sum_dyn_storage_buffers / 2);
+    dslb.descriptorCount = sum_dyn_storage_buffers + 1;
     dslb.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     dslb.pImmutableSamplers = NULL;
     dslb_vec.push_back(dslb);
@@ -6589,6 +6563,7 @@ TEST_F(VkLayerTest, CreatePipelineLayoutExcessDescriptorsOverall) {
     dslb_vec.push_back(dslb);
     dslb.binding = 1;
     dslb.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    // revisit: not robust to odd limits.
     uint32_t remaining = (max_samplers > sum_sampled_images ? 0 : (sum_sampled_images - max_samplers) / 2);
     dslb.descriptorCount = 1 + remaining;
     dslb.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -6605,6 +6580,7 @@ TEST_F(VkLayerTest, CreatePipelineLayoutExcessDescriptorsOverall) {
 
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_0fe00d24);
     if (dslb.descriptorCount > max_sampled_images) {
+        // revisit: not robust to `remaining` being small.
         m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
                                              VALIDATION_ERROR_0fe00244);  // expect max-per-stage too
     }
@@ -6618,12 +6594,13 @@ TEST_F(VkLayerTest, CreatePipelineLayoutExcessDescriptorsOverall) {
     dslb_vec.clear();
     dslb.binding = 0;
     dslb.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    dslb.descriptorCount = 1 + (sum_storage_images / 2);
+    dslb.descriptorCount = sum_storage_images / 2;
     dslb.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     dslb.pImmutableSamplers = NULL;
     dslb_vec.push_back(dslb);
     dslb.binding = 1;
     dslb.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
+    dslb.descriptorCount = sum_storage_images - dslb.descriptorCount + 1;
     dslb.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     dslb_vec.push_back(dslb);
 
@@ -6647,8 +6624,8 @@ TEST_F(VkLayerTest, CreatePipelineLayoutExcessDescriptorsOverall) {
     dslb_vec.clear();
     dslb.binding = 0;
     dslb.descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
-    dslb.descriptorCount = 1 + (sum_input_attachments / 2);
-    dslb.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+    dslb.descriptorCount = sum_input_attachments + 1;
+    dslb.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     dslb.pImmutableSamplers = NULL;
     dslb_vec.push_back(dslb);
 
@@ -7469,10 +7446,10 @@ TEST_F(VkPositiveLayerTest, DestroyPipelineRenderPass) {
     pipe.AddDefaultColorAttachment();
     pipe.AddShader(&vs);
     pipe.AddShader(&fs);
-    VkViewport view_port = {};
-    m_viewports.push_back(view_port);
+    VkViewport viewport = {0.0f, 0.0f, 64.0f, 64.0f, 0.0f, 1.0f};
+    m_viewports.push_back(viewport);
     pipe.SetViewport(m_viewports);
-    VkRect2D rect = {};
+    VkRect2D rect = {{0, 0}, {64, 64}};
     m_scissors.push_back(rect);
     pipe.SetScissor(m_scissors);
 
@@ -9753,10 +9730,10 @@ TEST_F(VkLayerTest, InvalidPipelineSampleRateFeatureEnable) {
                                           positive_test);
     };
 
-    range_test(NextAfterLess(0.0F), false);
-    range_test(NextAfterGreater(1.0F), false);
-    range_test(0.0, /* positive_test= */ true);
-    range_test(1.0, /* positive_test= */ true);
+    range_test(NearestSmaller(0.0F), false);
+    range_test(NearestGreater(1.0F), false);
+    range_test(0.0F, /* positive_test= */ true);
+    range_test(1.0F, /* positive_test= */ true);
 }
 
 TEST_F(VkLayerTest, InvalidPipelineSamplePNext) {
@@ -10284,7 +10261,7 @@ TEST_F(VkLayerTest, PSOLineWidthInvalid) {
     gp_ci.renderPass = renderPass();
     gp_ci.subpass = 0;
 
-    const std::vector<float> test_cases = {-1.0f, 0.0f, nextafterf(1.0f, 0.0f), nextafterf(1.0f, 2.0f), NAN};
+    const std::vector<float> test_cases = {-1.0f, 0.0f, NearestSmaller(1.0f), NearestGreater(1.0f), NAN};
 
     // test VkPipelineRasterizationStateCreateInfo::lineWidth
     for (const auto test_case : test_cases) {
@@ -11312,7 +11289,35 @@ TEST_F(VkLayerTest, InvalidBarriers) {
     m_addRenderPassSelfDependency = true;
     ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
 
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "Image Layout cannot be transitioned to UNDEFINED");
+    m_commandBuffer->begin();
+
+    // Use image unbound to memory in barrier
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
+                                         " used with no memory bound. Memory should be bound by calling vkBindImageMemory()");
+    vk_testing::Image unbound_image;
+    auto unbound_image_info = vk_testing::Image::create_info();
+    unbound_image_info.format = VK_FORMAT_B8G8R8A8_UNORM;
+    unbound_image_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+    unbound_image.init_no_mem(*m_device, unbound_image_info);
+    auto unbound_subresource = vk_testing::Image::subresource_range(unbound_image_info, VK_IMAGE_ASPECT_COLOR_BIT);
+    auto unbound_image_barrier = unbound_image.image_memory_barrier(0, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
+                                                                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, unbound_subresource);
+    vkCmdPipelineBarrier(m_commandBuffer->handle(), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0,
+                         nullptr, 0, nullptr, 1, &unbound_image_barrier);
+    m_errorMonitor->VerifyFound();
+
+    // Use buffer unbound to memory in barrier
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
+                                         " used with no memory bound. Memory should be bound by calling vkBindBufferMemory()");
+    vk_testing::Buffer unbound_buffer;
+    auto unbound_buffer_info = vk_testing::Buffer::create_info(16, VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    unbound_buffer.init_no_mem(*m_device, unbound_buffer_info);
+    auto unbound_buffer_barrier = unbound_buffer.buffer_memory_barrier(0, VK_ACCESS_TRANSFER_WRITE_BIT, 0, 16);
+    vkCmdPipelineBarrier(m_commandBuffer->handle(), VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0,
+                         nullptr, 1, &unbound_buffer_barrier, 0, nullptr);
+    m_errorMonitor->VerifyFound();
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_0a00095c);
     VkImageObj image(m_device);
     image.Init(128, 128, 1, VK_FORMAT_B8G8R8A8_UNORM, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_IMAGE_TILING_OPTIMAL, 0);
     ASSERT_TRUE(image.initialized());
@@ -11332,7 +11337,6 @@ TEST_F(VkLayerTest, InvalidBarriers) {
     img_barrier.subresourceRange.baseMipLevel = 0;
     img_barrier.subresourceRange.layerCount = 1;
     img_barrier.subresourceRange.levelCount = 1;
-    m_commandBuffer->begin();
     vkCmdPipelineBarrier(m_commandBuffer->handle(), VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_DEPENDENCY_BY_REGION_BIT, 0, nullptr, 0, nullptr, 1,
                          &img_barrier);
@@ -11364,9 +11368,9 @@ TEST_F(VkLayerTest, InvalidBarriers) {
     buf_barrier.offset = 0;
     buf_barrier.size = VK_WHOLE_SIZE;
 
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "which is not less than total size");
-    // Exceed the internal memory size
-    buf_barrier.offset = buffer.memory_requirements().size + 1;
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_01800946);
+    // Exceed the buffer size
+    buf_barrier.offset = buffer.create_info().size + 1;
     // Offset greater than total size
     vkCmdPipelineBarrier(m_commandBuffer->handle(), VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_DEPENDENCY_BY_REGION_BIT, 0, nullptr, 1, &buf_barrier, 0,
@@ -11374,8 +11378,8 @@ TEST_F(VkLayerTest, InvalidBarriers) {
     m_errorMonitor->VerifyFound();
     buf_barrier.offset = 0;
 
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "whose sum is greater than total size");
-    buf_barrier.size = buffer.memory_requirements().size + 1;
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_0180094a);
+    buf_barrier.size = buffer.create_info().size + 1;
     // Size greater than total size
     vkCmdPipelineBarrier(m_commandBuffer->handle(), VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_DEPENDENCY_BY_REGION_BIT, 0, nullptr, 1, &buf_barrier, 0,
@@ -13089,10 +13093,10 @@ TEST_F(VkLayerTest, RenderPassIncompatible) {
     pipe.AddShader(&vs);
     pipe.AddShader(&fs);
     pipe.AddDefaultColorAttachment();
-    VkViewport view_port = {};
-    m_viewports.push_back(view_port);
+    VkViewport viewport = {0.0f, 0.0f, 64.0f, 64.0f, 0.0f, 1.0f};
+    m_viewports.push_back(viewport);
     pipe.SetViewport(m_viewports);
-    VkRect2D rect = {};
+    VkRect2D rect = {{0, 0}, {64, 64}};
     m_scissors.push_back(rect);
     pipe.SetScissor(m_scissors);
     pipe.CreateVKPipeline(pipeline_layout.handle(), rp);
@@ -19060,7 +19064,7 @@ TEST_F(VkLayerTest, ImageFormatLimits) {
 
     uint32_t maxDim = std::max({image_create_info.extent.width, image_create_info.extent.height, image_create_info.extent.depth});
     // If max mip levels exceeds image extents, skip the max mip levels test
-    if ((imgFmtProps.maxMipLevels + 1) <= (floor(log2(maxDim)) + 1)) {
+    if ((imgFmtProps.maxMipLevels + 1) <= (std::floor(std::log2(maxDim)) + 1)) {
         m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_09e0077e);
         image_create_info.mipLevels = imgFmtProps.maxMipLevels + 1;
         // Expect INVALID_FORMAT_LIMITS_VIOLATION
@@ -19443,8 +19447,6 @@ TEST_F(VkLayerTest, CopyImageTypeExtentMismatch) {
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_09c0011a);
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
                                          VALIDATION_ERROR_0a600154);  // also triggers 'too many layers'
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
-                                         VALIDATION_ERROR_09c0012a);  // and 'copy from layer not present'
     m_commandBuffer->CopyImage(image_3D.image(), VK_IMAGE_LAYOUT_GENERAL, image_2D.image(), VK_IMAGE_LAYOUT_GENERAL, 1,
                                &copy_region);
     m_errorMonitor->VerifyFound();
@@ -19522,11 +19524,8 @@ TEST_F(VkLayerTest, CopyImageTypeExtentMismatchMaintenance1) {
     copy_region.srcOffset = {0, 0, 0};
     copy_region.dstOffset = {0, 0, 0};
 
-    // Copy from layer not present - VU 09c0012a
-    // TODO: this VU is redundant with VU 0a600154. Gitlab issue 812 submitted to have it removed.
     copy_region.srcSubresource.baseArrayLayer = 4;
     copy_region.srcSubresource.layerCount = 6;
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_09c0012a);
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_0a600154);
     m_commandBuffer->CopyImage(image_2D_array.image(), VK_IMAGE_LAYOUT_GENERAL, image_3D.image(), VK_IMAGE_LAYOUT_GENERAL, 1,
                                &copy_region);
@@ -19534,11 +19533,8 @@ TEST_F(VkLayerTest, CopyImageTypeExtentMismatchMaintenance1) {
     copy_region.srcSubresource.baseArrayLayer = 0;
     copy_region.srcSubresource.layerCount = 1;
 
-    // Copy to layer not present - VU 09c00136
-    // TODO: this VU is redundant with 0a600154. Gitlab issue 812 submitted to have it removed.
     copy_region.dstSubresource.baseArrayLayer = 1;
     copy_region.dstSubresource.layerCount = 8;
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_09c00136);
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_0a600154);
     m_commandBuffer->CopyImage(image_3D.image(), VK_IMAGE_LAYOUT_GENERAL, image_2D_array.image(), VK_IMAGE_LAYOUT_GENERAL, 1,
                                &copy_region);
@@ -20876,6 +20872,217 @@ TEST_F(VkLayerTest, InvalidCreateBufferSize) {
     m_errorMonitor->VerifyFound();
 }
 
+TEST_F(VkLayerTest, SetDynViewportParamTests) {
+    TEST_DESCRIPTION("Test parameters of vkCmdSetViewport without multiViewport feature");
+
+    VkPhysicalDeviceFeatures features{};
+    ASSERT_NO_FATAL_FAILURE(Init(&features));
+
+    const VkViewport vp = {0.0, 0.0, 64.0, 64.0, 0.0, 1.0};
+    const VkViewport viewports[] = {vp, vp};
+
+    m_commandBuffer->begin();
+
+    // array tests
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1e000990);
+    vkCmdSetViewport(m_commandBuffer->handle(), 1, 1, viewports);
+    m_errorMonitor->VerifyFound();
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1e030a1b);
+    vkCmdSetViewport(m_commandBuffer->handle(), 0, 0, nullptr);
+    m_errorMonitor->VerifyFound();
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1e000992);
+    vkCmdSetViewport(m_commandBuffer->handle(), 0, 2, viewports);
+    m_errorMonitor->VerifyFound();
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1e000990);
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1e030a1b);
+    vkCmdSetViewport(m_commandBuffer->handle(), 1, 0, viewports);
+    m_errorMonitor->VerifyFound();
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1e000990);
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1e000992);
+    vkCmdSetViewport(m_commandBuffer->handle(), 1, 2, viewports);
+    m_errorMonitor->VerifyFound();
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1e03fa01);
+    vkCmdSetViewport(m_commandBuffer->handle(), 0, 1, nullptr);
+    m_errorMonitor->VerifyFound();
+
+    // core viewport tests
+    using std::vector;
+    struct TestCase {
+        VkViewport vp;
+        vector<UNIQUE_VALIDATION_ERROR_CODE> vuids;
+    };
+
+    // not necessarily boundary values (unspecified cast rounding), but guaranteed to be over limit
+    const auto one_past_max_w = NearestGreater(static_cast<float>(m_device->props.limits.maxViewportDimensions[0]));
+    const auto one_past_max_h = NearestGreater(static_cast<float>(m_device->props.limits.maxViewportDimensions[1]));
+
+    const auto min_bound = m_device->props.limits.viewportBoundsRange[0];
+    const auto max_bound = m_device->props.limits.viewportBoundsRange[1];
+    const auto one_before_min_bounds = NearestSmaller(min_bound);
+    const auto one_past_max_bounds = NearestGreater(max_bound);
+
+    const auto below_zero = NearestSmaller(0.0f);
+    const auto past_one = NearestGreater(1.0f);
+
+    const vector<TestCase> test_cases = {
+        {{0.0, 0.0, 0.0, 64.0, 0.0, 1.0}, {VALIDATION_ERROR_15000dd4}},
+        {{0.0, 0.0, one_past_max_w, 64.0, 0.0, 1.0}, {VALIDATION_ERROR_15000dd6}},
+        {{0.0, 0.0, NAN, 64.0, 0.0, 1.0}, {VALIDATION_ERROR_15000dd4}},
+        {{0.0, 0.0, 64.0, 0.0, 0.0, 1.0}, {VALIDATION_ERROR_15000dd8}},
+        {{0.0, 0.0, 64.0, one_past_max_h, 0.0, 1.0}, {VALIDATION_ERROR_15000dda}},
+        {{0.0, 0.0, 64.0, NAN, 0.0, 1.0}, {VALIDATION_ERROR_15000dd8}},
+        {{one_before_min_bounds, 0.0, 64.0, 64.0, 0.0, 1.0}, {VALIDATION_ERROR_15000ddc}},
+        {{one_past_max_bounds, 0.0, 64.0, 64.0, 0.0, 1.0}, {VALIDATION_ERROR_150009a0}},
+        {{NAN, 0.0, 64.0, 64.0, 0.0, 1.0}, {VALIDATION_ERROR_15000ddc}},
+        {{0.0, one_before_min_bounds, 64.0, 64.0, 0.0, 1.0}, {VALIDATION_ERROR_15000dde}},
+        {{0.0, one_past_max_bounds, 64.0, 64.0, 0.0, 1.0}, {VALIDATION_ERROR_150009a2}},
+        {{0.0, NAN, 64.0, 64.0, 0.0, 1.0}, {VALIDATION_ERROR_15000dde}},
+        {{max_bound, 0.0, 1.0, 64.0, 0.0, 1.0}, {VALIDATION_ERROR_150009a0}},
+        {{0.0, max_bound, 64.0, 1.0, 0.0, 1.0}, {VALIDATION_ERROR_150009a2}},
+        {{0.0, 0.0, 64.0, 64.0, below_zero, 1.0}, {VALIDATION_ERROR_150009a4}},
+        {{0.0, 0.0, 64.0, 64.0, past_one, 1.0}, {VALIDATION_ERROR_150009a4}},
+        {{0.0, 0.0, 64.0, 64.0, NAN, 1.0}, {VALIDATION_ERROR_150009a4}},
+        {{0.0, 0.0, 64.0, 64.0, 0.0, below_zero}, {VALIDATION_ERROR_150009a6}},
+        {{0.0, 0.0, 64.0, 64.0, 0.0, past_one}, {VALIDATION_ERROR_150009a6}},
+        {{0.0, 0.0, 64.0, 64.0, 0.0, NAN}, {VALIDATION_ERROR_150009a6}},
+    };
+
+    for (const auto &test_case : test_cases) {
+        for (const auto vuid : test_case.vuids) m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, vuid);
+        vkCmdSetViewport(m_commandBuffer->handle(), 0, 1, &test_case.vp);
+        m_errorMonitor->VerifyFound();
+    }
+}
+
+void NegHeightViewportTests(VkDeviceObj *m_device, VkCommandBufferObj *m_commandBuffer, ErrorMonitor *m_errorMonitor) {
+    const auto &limits = m_device->props.limits;
+
+    m_commandBuffer->begin();
+
+    using std::vector;
+    struct TestCase {
+        VkViewport vp;
+        vector<UNIQUE_VALIDATION_ERROR_CODE> vuids;
+    };
+
+    // not necessarily boundary values (unspecified cast rounding), but guaranteed to be over limit
+    const auto one_before_min_h = NearestSmaller(-static_cast<float>(limits.maxViewportDimensions[1]));
+    const auto one_past_max_h = NearestGreater(static_cast<float>(limits.maxViewportDimensions[1]));
+
+    const auto min_bound = limits.viewportBoundsRange[0];
+    const auto max_bound = limits.viewportBoundsRange[1];
+    const auto one_before_min_bound = NearestSmaller(min_bound);
+    const auto one_past_max_bound = NearestGreater(max_bound);
+
+    const vector<TestCase> test_cases = {{{0.0, 0.0, 64.0, one_before_min_h, 0.0, 1.0}, {VALIDATION_ERROR_15000dda}},
+                                         {{0.0, 0.0, 64.0, one_past_max_h, 0.0, 1.0}, {VALIDATION_ERROR_15000dda}},
+                                         {{0.0, 0.0, 64.0, NAN, 0.0, 1.0}, {VALIDATION_ERROR_15000dda}},
+                                         {{0.0, one_before_min_bound, 64.0, 1.0, 0.0, 1.0}, {VALIDATION_ERROR_15000dde}},
+                                         {{0.0, one_past_max_bound, 64.0, -1.0, 0.0, 1.0}, {VALIDATION_ERROR_15000de0}},
+                                         {{0.0, min_bound, 64.0, -1.0, 0.0, 1.0}, {VALIDATION_ERROR_15000de2}},
+                                         {{0.0, max_bound, 64.0, 1.0, 0.0, 1.0}, {VALIDATION_ERROR_150009a2}}};
+
+    for (const auto &test_case : test_cases) {
+        for (const auto vuid : test_case.vuids) {
+            if (vuid == VALIDATION_ERROR_UNDEFINED)
+                m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
+                                                     "is less than VkPhysicalDeviceLimits::viewportBoundsRange[0]");
+            else
+                m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, vuid);
+        }
+        vkCmdSetViewport(m_commandBuffer->handle(), 0, 1, &test_case.vp);
+        m_errorMonitor->VerifyFound();
+    }
+}
+
+TEST_F(VkLayerTest, SetDynViewportParamMaintenance1Tests) {
+    TEST_DESCRIPTION("Verify errors are detected on misuse of SetViewport with a negative viewport extension enabled.");
+
+    ASSERT_NO_FATAL_FAILURE(InitFramework(myDbgFunc, m_errorMonitor));
+
+    if (DeviceExtensionSupported(gpu(), nullptr, VK_KHR_MAINTENANCE1_EXTENSION_NAME)) {
+        m_device_extension_names.push_back(VK_KHR_MAINTENANCE1_EXTENSION_NAME);
+    } else {
+        printf("             VK_KHR_maintenance1 extension not supported -- skipping test\n");
+        return;
+    }
+    ASSERT_NO_FATAL_FAILURE(InitState());
+
+    NegHeightViewportTests(m_device, m_commandBuffer, m_errorMonitor);
+}
+
+TEST_F(VkLayerTest, SetDynViewportParamAmdNegHeightTests) {
+    TEST_DESCRIPTION("Verify errors are detected on misuse of SetViewport with AMD negative viewport extension enabled.");
+
+    ASSERT_NO_FATAL_FAILURE(InitFramework(myDbgFunc, m_errorMonitor));
+
+    if (DeviceExtensionSupported(gpu(), nullptr, VK_AMD_NEGATIVE_VIEWPORT_HEIGHT_EXTENSION_NAME)) {
+        m_device_extension_names.push_back(VK_AMD_NEGATIVE_VIEWPORT_HEIGHT_EXTENSION_NAME);
+    } else {
+        printf("             VK_AMD_negative_viewport_height extension not supported -- skipping test\n");
+        return;
+    }
+    ASSERT_NO_FATAL_FAILURE(InitState());
+
+    NegHeightViewportTests(m_device, m_commandBuffer, m_errorMonitor);
+}
+
+TEST_F(VkLayerTest, SetDynViewportParamMultiviewportTests) {
+    TEST_DESCRIPTION("Test parameters of vkCmdSetViewport with multiViewport feature enabled");
+
+    ASSERT_NO_FATAL_FAILURE(Init());
+
+    if (!m_device->phy().features().multiViewport) {
+        printf("             VkPhysicalDeviceFeatures::multiViewport is not supported -- skipping test.\n");
+        return;
+    }
+
+    const auto max_viewports = m_device->props.limits.maxViewports;
+    const uint32_t too_many_viewports = 65536 + 1;  // let's say this is too much to allocate pViewports for
+
+    m_commandBuffer->begin();
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1e030a1b);
+    vkCmdSetViewport(m_commandBuffer->handle(), 0, 0, nullptr);
+    m_errorMonitor->VerifyFound();
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1e03fa01);
+    vkCmdSetViewport(m_commandBuffer->handle(), 0, max_viewports, nullptr);
+    m_errorMonitor->VerifyFound();
+
+    if (max_viewports >= too_many_viewports) {
+        printf(
+            "             VkPhysicalDeviceLimits::maxViewports is too large to practically test against -- skipping part of "
+            "test.\n");
+        return;
+    }
+
+    const VkViewport vp = {0.0, 0.0, 64.0, 64.0, 0.0, 1.0};
+    const std::vector<VkViewport> viewports(max_viewports + 1, vp);
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1e00098e);
+    vkCmdSetViewport(m_commandBuffer->handle(), 0, max_viewports + 1, viewports.data());
+    m_errorMonitor->VerifyFound();
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1e00098e);
+    vkCmdSetViewport(m_commandBuffer->handle(), max_viewports, 1, viewports.data());
+    m_errorMonitor->VerifyFound();
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1e00098e);
+    vkCmdSetViewport(m_commandBuffer->handle(), 1, max_viewports, viewports.data());
+    m_errorMonitor->VerifyFound();
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1e030a1b);
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1e00098e);
+    vkCmdSetViewport(m_commandBuffer->handle(), max_viewports + 1, 0, viewports.data());
+    m_errorMonitor->VerifyFound();
+}
+
 //
 // POSITIVE VALIDATION TESTS
 //
@@ -21673,110 +21880,116 @@ TEST_F(VkLayerTest, PushDescriptorSetCmdPushBadArgs) {
     m_errorMonitor->VerifyFound();
 }
 
-TEST_F(VkLayerTest, ViewportBoundsCheckingWithNVHExtensionEnabled) {
-    TEST_DESCRIPTION("Verify errors are detected on misuse of SetViewport with a negative viewport extension enabled.");
+TEST_F(VkLayerTest, SetDynScissorParamTests) {
+    TEST_DESCRIPTION("Test parameters of vkCmdSetScissor without multiViewport feature");
 
-    ASSERT_NO_FATAL_FAILURE(InitFramework(myDbgFunc, m_errorMonitor));
+    VkPhysicalDeviceFeatures features{};
+    ASSERT_NO_FATAL_FAILURE(Init(&features));
 
-    if (DeviceExtensionSupported(gpu(), nullptr, VK_KHR_MAINTENANCE1_EXTENSION_NAME)) {
-        m_device_extension_names.push_back(VK_KHR_MAINTENANCE1_EXTENSION_NAME);
-    } else {
-        printf("             Maintenance1 Extension not supported, skipping tests\n");
-        return;
-    }
-    ASSERT_NO_FATAL_FAILURE(InitState());
-    const VkPhysicalDeviceLimits &limits = m_device->props.limits;
+    const VkRect2D scissor = {{0, 0}, {16, 16}};
+    const VkRect2D scissors[] = {scissor, scissor};
 
     m_commandBuffer->begin();
-    {
-        m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1500099a);
-        VkViewport viewport = {0, 0, 16, -(static_cast<float>(limits.maxViewportDimensions[1] + 1)), 0, 1};
-        vkCmdSetViewport(m_commandBuffer->handle(), 0, 1, &viewport);
+
+    // array tests
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1d8004a2);
+    vkCmdSetScissor(m_commandBuffer->handle(), 1, 1, scissors);
+    m_errorMonitor->VerifyFound();
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1d82b61b);
+    vkCmdSetScissor(m_commandBuffer->handle(), 0, 0, nullptr);
+    m_errorMonitor->VerifyFound();
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1d8004a4);
+    vkCmdSetScissor(m_commandBuffer->handle(), 0, 2, scissors);
+    m_errorMonitor->VerifyFound();
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1d8004a2);
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1d82b61b);
+    vkCmdSetScissor(m_commandBuffer->handle(), 1, 0, scissors);
+    m_errorMonitor->VerifyFound();
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1d8004a2);
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1d8004a4);
+    vkCmdSetScissor(m_commandBuffer->handle(), 1, 2, scissors);
+    m_errorMonitor->VerifyFound();
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1d822601);
+    vkCmdSetScissor(m_commandBuffer->handle(), 0, 1, nullptr);
+    m_errorMonitor->VerifyFound();
+
+    struct TestCase {
+        VkRect2D scissor;
+        UNIQUE_VALIDATION_ERROR_CODE vuid;
+    };
+
+    std::vector<TestCase> test_cases = {{{{-1, 0}, {16, 16}}, VALIDATION_ERROR_1d8004a6},
+                                        {{{0, -1}, {16, 16}}, VALIDATION_ERROR_1d8004a6},
+                                        {{{1, 0}, {INT32_MAX, 16}}, VALIDATION_ERROR_1d8004a8},
+                                        {{{INT32_MAX, 0}, {1, 16}}, VALIDATION_ERROR_1d8004a8},
+                                        {{{0, 0}, {uint32_t{INT32_MAX} + 1, 16}}, VALIDATION_ERROR_1d8004a8},
+                                        {{{0, 1}, {16, INT32_MAX}}, VALIDATION_ERROR_1d8004aa},
+                                        {{{0, INT32_MAX}, {16, 1}}, VALIDATION_ERROR_1d8004aa},
+                                        {{{0, 0}, {16, uint32_t{INT32_MAX} + 1}}, VALIDATION_ERROR_1d8004aa}};
+
+    for (const auto &test_case : test_cases) {
+        m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, test_case.vuid);
+        vkCmdSetScissor(m_commandBuffer->handle(), 0, 1, &test_case.scissor);
         m_errorMonitor->VerifyFound();
     }
+
     m_commandBuffer->end();
 }
 
-TEST_F(VkLayerTest, ViewportAndScissorBoundsChecking) {
-    TEST_DESCRIPTION("Verify errors are detected on misuse of SetViewport and SetScissor.");
+TEST_F(VkLayerTest, SetDynScissorParamMultiviewportTests) {
+    TEST_DESCRIPTION("Test parameters of vkCmdSetScissor with multiViewport feature enabled");
 
     ASSERT_NO_FATAL_FAILURE(Init());
 
+    if (!m_device->phy().features().multiViewport) {
+        printf("             VkPhysicalDeviceFeatures::multiViewport is not supported -- skipping test.\n");
+        return;
+    }
+
+    const auto max_scissors = m_device->props.limits.maxViewports;
+    const uint32_t too_many_scissors = 65536 + 1;  // let's say this is too much to allocate pScissors for
+
     m_commandBuffer->begin();
 
-    const VkPhysicalDeviceLimits &limits = m_device->props.limits;
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1d82b61b);
+    vkCmdSetScissor(m_commandBuffer->handle(), 0, 0, nullptr);
+    m_errorMonitor->VerifyFound();
 
-    {
-        m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_15000996);
-        VkViewport viewport = {0, 0, static_cast<float>(limits.maxViewportDimensions[0] + 1), 16, 0, 1};
-        vkCmdSetViewport(m_commandBuffer->handle(), 0, 1, &viewport);
-        m_errorMonitor->VerifyFound();
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1d822601);
+    vkCmdSetScissor(m_commandBuffer->handle(), 0, max_scissors, nullptr);
+    m_errorMonitor->VerifyFound();
+
+    if (max_scissors >= too_many_scissors) {
+        printf(
+            "             VkPhysicalDeviceLimits::maxViewports is too large to practically test against -- skipping part of "
+            "test.\n");
+        return;
     }
 
-    {
-        m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_15000998);
-        VkViewport viewport = {0, 0, 16, static_cast<float>(limits.maxViewportDimensions[1] + 1), 0, 1};
-        vkCmdSetViewport(m_commandBuffer->handle(), 0, 1, &viewport);
-        m_errorMonitor->VerifyFound();
-    }
+    const VkRect2D scissor = {{0, 0}, {16, 16}};
+    const std::vector<VkRect2D> scissors(max_scissors + 1, scissor);
 
-    {
-        m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1500099e);
-        VkViewport viewport = {limits.viewportBoundsRange[0] - 1, 0, 16, 16, 0, 1};
-        vkCmdSetViewport(m_commandBuffer->handle(), 0, 1, &viewport);
-        m_errorMonitor->VerifyFound();
-    }
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1d8004a0);
+    vkCmdSetScissor(m_commandBuffer->handle(), 0, max_scissors + 1, scissors.data());
+    m_errorMonitor->VerifyFound();
 
-    {
-        m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1500099e);
-        VkViewport viewport = {0, limits.viewportBoundsRange[0] - 1, 16, 16, 0, 1};
-        vkCmdSetViewport(m_commandBuffer->handle(), 0, 1, &viewport);
-        m_errorMonitor->VerifyFound();
-    }
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1d8004a0);
+    vkCmdSetScissor(m_commandBuffer->handle(), max_scissors, 1, scissors.data());
+    m_errorMonitor->VerifyFound();
 
-    {
-        m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_150009a0);
-        VkViewport viewport = {limits.viewportBoundsRange[1], 0, 16, 16, 0, 1};
-        vkCmdSetViewport(m_commandBuffer->handle(), 0, 1, &viewport);
-        m_errorMonitor->VerifyFound();
-    }
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1d8004a0);
+    vkCmdSetScissor(m_commandBuffer->handle(), 1, max_scissors, scissors.data());
+    m_errorMonitor->VerifyFound();
 
-    {
-        m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_150009a2);
-        VkViewport viewport = {0, limits.viewportBoundsRange[1], 16, 16, 0, 1};
-        vkCmdSetViewport(m_commandBuffer->handle(), 0, 1, &viewport);
-        m_errorMonitor->VerifyFound();
-    }
-
-    {
-        m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1d8004a6);
-        VkRect2D scissor = {{-1, 0}, {16, 16}};
-        vkCmdSetScissor(m_commandBuffer->handle(), 0, 1, &scissor);
-        m_errorMonitor->VerifyFound();
-    }
-
-    {
-        m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1d8004a6);
-        VkRect2D scissor = {{0, -2}, {16, 16}};
-        vkCmdSetScissor(m_commandBuffer->handle(), 0, 1, &scissor);
-        m_errorMonitor->VerifyFound();
-    }
-
-    {
-        m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1d8004a8);
-        VkRect2D scissor = {{100, 100}, {INT_MAX, 16}};
-        vkCmdSetScissor(m_commandBuffer->handle(), 0, 1, &scissor);
-        m_errorMonitor->VerifyFound();
-    }
-
-    {
-        m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1d8004aa);
-        VkRect2D scissor = {{100, 100}, {16, INT_MAX}};
-        vkCmdSetScissor(m_commandBuffer->handle(), 0, 1, &scissor);
-        m_errorMonitor->VerifyFound();
-    }
-
-    m_commandBuffer->end();
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1d82b61b);
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_1d8004a0);
+    vkCmdSetScissor(m_commandBuffer->handle(), max_scissors + 1, 0, scissors.data());
+    m_errorMonitor->VerifyFound();
 }
 
 // This is a positive test. No failures are expected.
