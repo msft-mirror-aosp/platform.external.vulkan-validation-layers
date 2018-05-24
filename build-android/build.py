@@ -150,7 +150,7 @@ def main():
   print('platforms_root: %s' % platforms_root)
 
   compiler = 'clang'
-  stl = 'gnustl_static'
+  stl = 'c++_static'
   obj_out = os.path.join(THIS_DIR, stl, 'obj')
   lib_out = os.path.join(THIS_DIR, 'jniLibs')
 
@@ -182,6 +182,7 @@ def main():
           'dest_dir': 'third_party/shaderc/third_party/spirv-tools',
           'files': [
               'utils/generate_grammar_tables.py',
+              'utils/generate_language_headers.py',
               'utils/generate_registry_tables.py',
               'utils/update_build_version.py',
               'Android.mk',
