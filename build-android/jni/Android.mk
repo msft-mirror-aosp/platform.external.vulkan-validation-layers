@@ -18,7 +18,7 @@ SRC_DIR := ../..
 LAYER_DIR := ../generated
 THIRD_PARTY := ../third_party
 
-VULKAN_INCLUDE := $(LOCAL_PATH)/$(THIRD_PARTY)/Vulkan-Headers/include
+VULKAN_INCLUDE := $(LOCAL_PATH)/$(SRC_DIR)/include
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := layer_utils
