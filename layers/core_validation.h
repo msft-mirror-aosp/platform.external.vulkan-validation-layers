@@ -68,11 +68,6 @@
 // TODO : Is there a way to track when Cmd Buffer finishes & remove mem references at that point?
 // TODO : Could potentially store a list of freed mem allocs to flag when they're incorrectly used
 
-struct GENERIC_HEADER {
-    VkStructureType sType;
-    const void *pNext;
-};
-
 enum SyncScope {
     kSyncScopeInternal,
     kSyncScopeExternalTemporary,
@@ -133,7 +128,7 @@ struct PHYSICAL_DEVICE_STATE {
     CALL_STATE vkGetPhysicalDeviceSurfacePresentModesKHRState = UNCALLED;
     CALL_STATE vkGetPhysicalDeviceSurfaceFormatsKHRState = UNCALLED;
     CALL_STATE vkGetPhysicalDeviceDisplayPlanePropertiesKHRState = UNCALLED;
-    VkPhysicalDeviceFeatures features = {};
+    safe_VkPhysicalDeviceFeatures2 features2 = {};
     VkPhysicalDevice phys_device = VK_NULL_HANDLE;
     uint32_t queue_family_count = 0;
     std::vector<VkQueueFamilyProperties> queue_family_properties;
