@@ -57,7 +57,7 @@ set -e
     echo No spirv-tools git_dir found, generating UUID for external_revision_generator.py
 
     # Ensure uuidgen is installed, this should error if not found
-    uuidgen --v
+    type uuidgen
 
     uuidgen > $SPIRV_TOOLS_UUID;
     cat $SPIRV_TOOLS_UUID;
