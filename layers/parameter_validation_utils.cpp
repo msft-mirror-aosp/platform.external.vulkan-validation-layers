@@ -1,7 +1,7 @@
-/* Copyright (c) 2015-2017 The Khronos Group Inc.
- * Copyright (c) 2015-2017 Valve Corporation
- * Copyright (c) 2015-2017 LunarG, Inc.
- * Copyright (C) 2015-2017 Google Inc.
+/* Copyright (c) 2015-2018 The Khronos Group Inc.
+ * Copyright (c) 2015-2018 Valve Corporation
+ * Copyright (c) 2015-2018 LunarG, Inc.
+ * Copyright (C) 2015-2018 Google Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@
  */
 
 #define NOMINMAX
-#define VALIDATION_ERROR_MAP_IMPL
 
 #include <limits.h>
 #include <math.h>
@@ -983,9 +982,9 @@ bool pv_vkCreateImage(VkDevice device, const VkImageCreateInfo *pCreateInfo, con
         // If multi-sample, validate type, usage, tiling and mip levels.
         if ((pCreateInfo->samples != VK_SAMPLE_COUNT_1_BIT) &&
             ((pCreateInfo->imageType != VK_IMAGE_TYPE_2D) || (pCreateInfo->flags & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) ||
-             (pCreateInfo->tiling != VK_IMAGE_TILING_OPTIMAL) || (pCreateInfo->mipLevels != 1))) {
+             (pCreateInfo->mipLevels != 1) || (pCreateInfo->tiling != VK_IMAGE_TILING_OPTIMAL))) {
             skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT, 0,
-                            "VUID-VkImageCreateInfo-samples-00962",
+                            "VUID-VkImageCreateInfo-samples-02257",
                             "vkCreateImage(): Multi-sample image with incompatible type, usage, tiling, or mips.");
         }
 
@@ -2131,11 +2130,16 @@ bool pv_vkCreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache
                     }
                 }
 
+                const VkStructureType allowed_structs_VkPipelineColorBlendStateCreateInfo[] = {
+                    VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_ADVANCED_STATE_CREATE_INFO_EXT};
+
                 if (pCreateInfos[i].pColorBlendState != nullptr && uses_color_attachment) {
                     skip |= validate_struct_pnext(
                         report_data, "vkCreateGraphicsPipelines",
-                        ParameterName("pCreateInfos[%i].pColorBlendState->pNext", ParameterName::IndexVector{i}), NULL,
-                        pCreateInfos[i].pColorBlendState->pNext, 0, NULL, GeneratedHeaderVersion,
+                        ParameterName("pCreateInfos[%i].pColorBlendState->pNext", ParameterName::IndexVector{i}),
+                        "VkPipelineColorBlendAdvancedStateCreateInfoEXT", pCreateInfos[i].pColorBlendState->pNext,
+                        ARRAY_SIZE(allowed_structs_VkPipelineColorBlendStateCreateInfo),
+                        allowed_structs_VkPipelineColorBlendStateCreateInfo, GeneratedHeaderVersion,
                         "VUID-VkPipelineColorBlendStateCreateInfo-pNext-pNext");
 
                     skip |= validate_reserved_flags(
