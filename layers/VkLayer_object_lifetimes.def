@@ -17,13 +17,14 @@
 ; See the License for the specific language governing permissions and
 ; limitations under the License.
 ;
-;  Author: Courtney Goeltzenleuchter <courtney@LunarG.com>
+;  Author: Mark Lobodzinski <mark@lunarg.com>
 ;
 ;;;;  End Copyright Notice ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-LIBRARY VkLayer_swapchain
+LIBRARY VkLayer_object_lifetimes
 EXPORTS
 vkGetInstanceProcAddr
 vkGetDeviceProcAddr
 vkEnumerateInstanceLayerProperties
 vkEnumerateInstanceExtensionProperties
+vkNegotiateLoaderLayerInterfaceVersion
