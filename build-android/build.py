@@ -208,7 +208,9 @@ def main():
       {
           'source_dir': os.path.join(shaderc_root_dir, 'glslang'),
           'dest_dir': 'third_party/shaderc/third_party/glslang',
-          'files': ['glslang/OSDependent/osinclude.h'],
+          'files': ['glslang/OSDependent/osinclude.h',
+                    'Android.mk',
+                   ],
           'dirs': [
               'SPIRV',
               'OGLCompilersDLL',
