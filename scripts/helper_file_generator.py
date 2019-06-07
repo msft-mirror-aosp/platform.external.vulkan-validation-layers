@@ -1,9 +1,9 @@
 #!/usr/bin/python3 -i
 #
-# Copyright (c) 2015-2017 The Khronos Group Inc.
-# Copyright (c) 2015-2017 Valve Corporation
-# Copyright (c) 2015-2017 LunarG, Inc.
-# Copyright (c) 2015-2017 Google Inc.
+# Copyright (c) 2015-2019 The Khronos Group Inc.
+# Copyright (c) 2015-2019 Valve Corporation
+# Copyright (c) 2015-2019 LunarG, Inc.
+# Copyright (c) 2015-2019 Google Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ from common_codegen import *
 # HelperFileOutputGeneratorOptions - subclass of GeneratorOptions.
 class HelperFileOutputGeneratorOptions(GeneratorOptions):
     def __init__(self,
+                 conventions = None,
                  filename = None,
                  directory = '.',
                  apiname = None,
@@ -53,7 +54,7 @@ class HelperFileOutputGeneratorOptions(GeneratorOptions):
                  library_name = '',
                  expandEnumerants = True,
                  helper_file_type = ''):
-        GeneratorOptions.__init__(self, filename, directory, apiname, profile,
+        GeneratorOptions.__init__(self, conventions, filename, directory, apiname, profile,
                                   versions, emitversions, defaultExtensions,
                                   addExtensions, removeExtensions, emitExtensions, sortProcedure)
         self.prefixText       = prefixText
@@ -117,10 +118,10 @@ class HelperFileOutputGenerator(OutputGenerator):
         copyright += '\n'
         copyright += '/***************************************************************************\n'
         copyright += ' *\n'
-        copyright += ' * Copyright (c) 2015-2017 The Khronos Group Inc.\n'
-        copyright += ' * Copyright (c) 2015-2017 Valve Corporation\n'
-        copyright += ' * Copyright (c) 2015-2017 LunarG, Inc.\n'
-        copyright += ' * Copyright (c) 2015-2017 Google Inc.\n'
+        copyright += ' * Copyright (c) 2015-2019 The Khronos Group Inc.\n'
+        copyright += ' * Copyright (c) 2015-2019 Valve Corporation\n'
+        copyright += ' * Copyright (c) 2015-2019 LunarG, Inc.\n'
+        copyright += ' * Copyright (c) 2015-2019 Google Inc.\n'
         copyright += ' *\n'
         copyright += ' * Licensed under the Apache License, Version 2.0 (the "License");\n'
         copyright += ' * you may not use this file except in compliance with the License.\n'
@@ -229,7 +230,7 @@ class HelperFileOutputGenerator(OutputGenerator):
     def paramIsPointer(self, param):
         ispointer = False
         for elem in param:
-            if ((elem.tag is not 'type') and (elem.tail is not None)) and '*' in elem.tail:
+            if elem.tag == 'type' and elem.tail is not None and '*' in elem.tail:
                 ispointer = True
         return ispointer
     #
@@ -361,6 +362,8 @@ class HelperFileOutputGenerator(OutputGenerator):
     # Enum_string_header: Create a routine to convert an enumerated value into a string
     def GenerateEnumStringConversion(self, groupName, value_list):
         outstring = '\n'
+        if self.featureExtraProtect is not None:
+            outstring += '\n#ifdef %s\n\n' % self.featureExtraProtect
         outstring += 'static inline const char* string_%s(%s input_value)\n' % (groupName, groupName)
         outstring += '{\n'
         outstring += '    switch ((%s)input_value)\n' % groupName
@@ -374,6 +377,8 @@ class HelperFileOutputGenerator(OutputGenerator):
         outstring += '            return "Unhandled %s";\n' % groupName
         outstring += '    }\n'
         outstring += '}\n'
+        if self.featureExtraProtect is not None:
+            outstring += '#endif // %s\n' % self.featureExtraProtect
         return outstring
     #
     # Tack on a helper which, given an index into a VkPhysicalDeviceFeatures structure, will print the corresponding feature name
@@ -654,19 +659,22 @@ class HelperFileOutputGenerator(OutputGenerator):
         object_types_helper_header = '\n'
         object_types_helper_header += '#pragma once\n'
         object_types_helper_header += '\n'
-        object_types_helper_header += '#include <vulkan/vulkan.h>\n\n'
         object_types_helper_header += self.GenerateObjectTypesHeader()
         return object_types_helper_header
     #
     # Object types header: create object enum type header file
     def GenerateObjectTypesHeader(self):
-        object_types_header = ''
+        object_types_header = '#include "cast_utils.h"\n'
+        object_types_header += '\n'
         object_types_header += '// Object Type enum for validation layer internal object handling\n'
         object_types_header += 'typedef enum VulkanObjectType {\n'
         object_types_header += '    kVulkanObjectTypeUnknown = 0,\n'
         enum_num = 1
         type_list = [];
         enum_entry_map = {}
+        non_dispatchable = {}
+        dispatchable = {}
+        object_type_info = {}
 
         # Output enum definition as each handle is processed, saving the names to use for the conversion routine
         for item in self.object_types:
@@ -677,6 +685,13 @@ class HelperFileOutputGenerator(OutputGenerator):
             object_types_header += ' = %d,\n' % enum_num
             enum_num += 1
             type_list.append(enum_entry)
+            object_type_info[enum_entry] = { 'VkType': item }
+            # We'll want lists of the dispatchable and non dispatchable handles below with access to the same info
+            if IsHandleTypeNonDispatchable(self.registry.tree, item) :
+                non_dispatchable[item] = enum_entry
+            else:
+                dispatchable[item] = enum_entry
+
         object_types_header += '    kVulkanObjectTypeMax = %d,\n' % enum_num
         object_types_header += '    // Aliases for backwards compatibilty of "promoted" types\n'
         for (name, alias) in self.object_type_aliases:
@@ -706,9 +721,11 @@ class HelperFileOutputGenerator(OutputGenerator):
         dbg_re = '^VK_DEBUG_REPORT_OBJECT_TYPE_(.*)_EXT$'
         dbg_map = {to_key(dbg_re, dbg) : dbg for dbg in self.debug_report_object_types}
         dbg_default = 'VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT'
+
         for object_type in type_list:
             vk_object_type = dbg_map.get(object_type.replace("kVulkanObjectType", "").lower(), dbg_default)
             object_types_header += '    %s,   // %s\n' % (vk_object_type, object_type)
+            object_type_info[object_type]['DbgType'] = vk_object_type
         object_types_header += '};\n'
 
         # Output a conversion routine from the layer object definitions to the core object type definitions
@@ -723,6 +740,7 @@ class HelperFileOutputGenerator(OutputGenerator):
         for object_type in type_list:
             vk_object_type = vko_map[object_type.replace("kVulkanObjectType", "").lower()]
             object_types_header += '    %s,   // %s\n' % (vk_object_type, object_type)
+            object_type_info[object_type]['VkoType'] = vk_object_type
         object_types_header += '};\n'
 
         # Create a function to convert from VkDebugReportObjectTypeEXT to VkObjectType
@@ -766,6 +784,76 @@ class HelperFileOutputGenerator(OutputGenerator):
         object_types_header += '    }\n'
         object_types_header += '    return VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT;\n'
         object_types_header += '}\n'
+
+        traits_format = Outdent('''
+            template <> struct VkHandleInfo<{vk_type}> {{
+                static const VulkanObjectType kVulkanObjectType = {obj_type};
+                static const VkDebugReportObjectTypeEXT kDebugReportObjectType = {dbg_type};
+                static const VkObjectType kVkObjectType = {vko_type};
+                static const char* Typename() {{
+                    return "{vk_type}";
+                }}
+            }};
+            template <> struct VulkanObjectTypeInfo<{obj_type}> {{
+                typedef {vk_type} Type;
+            }};
+            ''')
+
+        object_types_header += Outdent('''
+            // Traits objects from each type statically map from Vk<handleType> to the various enums
+            template <typename VkType> struct VkHandleInfo {};
+            template <VulkanObjectType id> struct VulkanObjectTypeInfo {};
+
+            // The following line must match the vulkan_core.h condition guarding VK_DEFINE_NON_DISPATCHABLE_HANDLE
+            #if defined(__LP64__) || defined(_WIN64) || (defined(__x86_64__) && !defined(__ILP32__)) || defined(_M_X64) || defined(__ia64) || \
+                defined(_M_IA64) || defined(__aarch64__) || defined(__powerpc64__)
+            #define TYPESAFE_NONDISPATCHABLE_HANDLES
+            #else
+            VK_DEFINE_NON_DISPATCHABLE_HANDLE(VkNonDispatchableHandle)
+            ''')  +'\n'
+        object_types_header += traits_format.format(vk_type='VkNonDispatchableHandle', obj_type='kVulkanObjectTypeUnknown',
+                                                  dbg_type='VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT',
+                                                  vko_type='VK_OBJECT_TYPE_UNKNOWN') + '\n'
+        object_types_header += '#endif //  VK_DEFINE_HANDLE logic duplication\n'
+
+        for vk_type, object_type in dispatchable.items():
+            info = object_type_info[object_type]
+            object_types_header += traits_format.format(vk_type=vk_type, obj_type=object_type, dbg_type=info['DbgType'],
+                                                      vko_type=info['VkoType'])
+        object_types_header += '#ifdef TYPESAFE_NONDISPATCHABLE_HANDLES\n'
+        for vk_type, object_type in non_dispatchable.items():
+            info = object_type_info[object_type]
+            object_types_header += traits_format.format(vk_type=vk_type, obj_type=object_type, dbg_type=info['DbgType'],
+                                                      vko_type=info['VkoType'])
+        object_types_header += '#endif // TYPESAFE_NONDISPATCHABLE_HANDLES\n'
+
+        object_types_header += Outdent('''
+            struct VulkanTypedHandle {
+                uint64_t handle;
+                VulkanObjectType type;
+                template <typename Handle>
+                VulkanTypedHandle(Handle handle_, VulkanObjectType type_) :
+                    handle(CastToUint64(handle_)),
+                    type(type_) {
+            #ifdef TYPESAFE_NONDISPATCHABLE_HANDLES
+                    // For 32 bit it's not always safe to check for traits <-> type
+                    // as all non-dispatchable handles have the same type-id and thus traits,
+                    // but on 64 bit we can validate the passed type matches the passed handle
+                    assert(type == VkHandleInfo<Handle>::kVulkanObjectType);
+            #endif // TYPESAFE_NONDISPATCHABLE_HANDLES
+                }
+                template <typename Handle>
+                Handle Cast() const {
+            #ifdef TYPESAFE_NONDISPATCHABLE_HANDLES
+                    assert(type == VkHandleInfo<Handle>::kVulkanObjectType);
+            #endif // TYPESAFE_NONDISPATCHABLE_HANDLES
+                    return CastFromUint64<Handle>(handle);
+                }
+                VulkanTypedHandle() :
+                    handle(VK_NULL_HANDLE),
+                    type(kVulkanObjectTypeUnknown) {}
+            }; ''')  +'\n'
+
         return object_types_header
     #
     # Determine if a structure needs a safe_struct helper function
@@ -1131,7 +1219,7 @@ class HelperFileOutputGenerator(OutputGenerator):
         type_member = 'Type'
         id_member = 'kSType'
         id_decl = 'static const VkStructureType '
-        generic_header = prefix + 'GenericHeader'
+        generic_header = 'VkBaseOutStructure'
         typename_func = fprefix + 'typename'
         idname_func = fprefix + 'stype_name'
         find_func = fprefix + 'find_in_chain'
@@ -1155,12 +1243,6 @@ class HelperFileOutputGenerator(OutputGenerator):
 
         # Define the utilities (here so any renaming stays consistent), if this grows large, refactor to a fixed .h file
         utilities_format = '\n'.join((
-            '// Header "base class" for pNext chain traversal',
-            'struct {header} {{',
-            '   VkStructureType sType;',
-            '   const {header} *pNext;',
-            '}};',
-            '',
             '// Find an entry of the given type in the pNext chain',
             'template <typename T> const T *{find_func}(const void *next) {{',
             '    const {header} *current = reinterpret_cast<const {header} *>(next);',

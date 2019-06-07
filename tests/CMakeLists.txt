@@ -62,7 +62,8 @@ endif()
 
 set(LIBGLM_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/libs)
 
-set(COMMON_CPP vkrenderframework.cpp vktestbinding.cpp vktestframework.cpp test_environment.cpp)
+set(COMMON_CPP vklayertests_pipeline_shader.cpp vklayertests_buffer_image_memory_sampler.cpp vklayertests_others.cpp vklayertests_descriptor_renderpass_framebuffer.cpp
+				vklayertests_command.cpp vkpositivelayertests.cpp vkrenderframework.cpp vktestbinding.cpp vktestframework.cpp test_environment.cpp)
 
 if(NOT WIN32)
     # extra setup for out-of-tree builds
@@ -109,6 +110,7 @@ add_executable(vk_layer_validation_tests
                ../layers/convert_to_renderpass2.cpp
                ${PROJECT_BINARY_DIR}/vk_safe_struct.cpp
                ${COMMON_CPP})
+add_test(NAME vk_layer_validation_tests COMMAND vk_layer_validation_tests)
 add_dependencies(vk_layer_validation_tests Vulkan::Vulkan)
 if(NOT GTEST_IS_STATIC_LIB)
     set_target_properties(vk_layer_validation_tests PROPERTIES COMPILE_DEFINITIONS "GTEST_LINKED_AS_SHARED_LIBRARY=1")
@@ -124,14 +126,7 @@ target_include_directories(vk_layer_validation_tests
                                   ${PROJECT_BINARY_DIR}
                                   ${PROJECT_BINARY_DIR}/layers)
 add_dependencies(vk_layer_validation_tests
-                 VkLayer_utils
-                 VkLayer_core_validation-json
-                 VkLayer_device_profile_api-json
-                 VkLayer_object_lifetimes-json
-                 VkLayer_stateless_validation-json
-                 VkLayer_standard_validation-json
-                 VkLayer_thread_safety-json
-                 VkLayer_unique_objects-json)
+                 VkLayer_utils)
 
 # Specify target_link_libraries
 if(WIN32)

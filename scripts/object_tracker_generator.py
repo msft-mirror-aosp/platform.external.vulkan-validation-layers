@@ -64,6 +64,7 @@ from io import open
 #     separate line, align parameter names at the specified column
 class ObjectTrackerGeneratorOptions(GeneratorOptions):
     def __init__(self,
+                 conventions = None,
                  filename = None,
                  directory = '.',
                  apiname = None,
@@ -87,7 +88,7 @@ class ObjectTrackerGeneratorOptions(GeneratorOptions):
                  alignFuncParam = 0,
                  expandEnumerants = True,
                  valid_usage_path = ''):
-        GeneratorOptions.__init__(self, filename, directory, apiname, profile,
+        GeneratorOptions.__init__(self, conventions, filename, directory, apiname, profile,
                                   versions, emitversions, defaultExtensions,
                                   addExtensions, removeExtensions, emitExtensions, sortProcedure)
         self.prefixText      = prefixText
@@ -265,7 +266,7 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
             if alias:
                 alias_string = 'VUID-%s-%s' % (alias, suffix)
                 if alias_string in self.valid_vuids:
-                    vuid = "\"%s\"" % vuid_string
+                    vuid = "\"%s\"" % alias_string
         return vuid
     #
     # Increases indent by 4 spaces and tracks it globally
@@ -490,7 +491,7 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
     def paramIsPointer(self, param):
         ispointer = False
         for elem in param:
-            if ((elem.tag is not 'type') and (elem.tail is not None)) and '*' in elem.tail:
+            if elem.tag == 'type' and elem.tail is not None and '*' in elem.tail:
                 ispointer = True
         return ispointer
     #
