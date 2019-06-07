@@ -89,6 +89,9 @@ class VkRenderFramework : public VkTestFramework {
     VkFramebuffer framebuffer() { return m_framebuffer; }
     void InitViewport(float width, float height);
     void InitViewport();
+    void InitSwapchain(float width, float height);
+    void InitSwapchain();
+    void DestroySwapchain();
     void InitRenderTarget();
     void InitRenderTarget(uint32_t targets);
     void InitRenderTarget(VkImageView *dsBinding);
@@ -111,6 +114,7 @@ class VkRenderFramework : public VkTestFramework {
     bool DeviceExtensionSupported(VkPhysicalDevice dev, const char *layer, const char *name, uint32_t specVersion = 0);
     bool DeviceExtensionEnabled(const char *name);
     bool DeviceIsMockICD();
+    bool DeviceSimulation();
     bool DeviceCanDraw();
 
    protected:
@@ -124,6 +128,8 @@ class VkRenderFramework : public VkTestFramework {
     VkRenderPass m_renderPass;
     VkRenderPassCreateInfo renderPass_info_ = {};
     VkFramebuffer m_framebuffer;
+    VkSurfaceKHR m_surface;
+    VkSwapchainKHR m_swapchain;
     std::vector<VkViewport> m_viewports;
     std::vector<VkRect2D> m_scissors;
     float m_lineWidth;
@@ -260,13 +266,12 @@ class VkImageObj : public vk_testing::Image {
    public:
     void Init(uint32_t const width, uint32_t const height, uint32_t const mipLevels, VkFormat const format, VkFlags const usage,
               VkImageTiling const tiling = VK_IMAGE_TILING_LINEAR, VkMemoryPropertyFlags const reqs = 0,
-              const std::vector<uint32_t> *queue_families = nullptr);
-
+              const std::vector<uint32_t> *queue_families = nullptr, bool memory = true);
     void init(const VkImageCreateInfo *create_info);
 
     void InitNoLayout(uint32_t const width, uint32_t const height, uint32_t const mipLevels, VkFormat const format,
                       VkFlags const usage, VkImageTiling tiling = VK_IMAGE_TILING_LINEAR, VkMemoryPropertyFlags reqs = 0,
-                      const std::vector<uint32_t> *queue_families = nullptr);
+                      const std::vector<uint32_t> *queue_families = nullptr, bool memory = true);
 
     //    void clear( CommandBuffer*, uint32_t[4] );
 
@@ -279,7 +284,10 @@ class VkImageObj : public vk_testing::Image {
     void UnmapMemory() { Image::memory().unmap(); }
 
     void ImageMemoryBarrier(VkCommandBufferObj *cmd, VkImageAspectFlags aspect, VkFlags output_mask, VkFlags input_mask,
-                            VkImageLayout image_layout);
+                            VkImageLayout image_layout, VkPipelineStageFlags src_stages = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                            VkPipelineStageFlags dest_stages = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                            uint32_t srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                            uint32_t dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED);
 
     VkResult CopyImage(VkImageObj &src_image);
 
@@ -289,7 +297,7 @@ class VkImageObj : public vk_testing::Image {
 
     VkImage image() const { return handle(); }
 
-    VkImageView targetView(VkFormat format) {
+    VkImageView targetView(VkFormat format, VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
         if (!m_targetView.initialized()) {
             VkImageViewCreateInfo createView = {};
             createView.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -300,7 +308,7 @@ class VkImageObj : public vk_testing::Image {
             createView.components.g = VK_COMPONENT_SWIZZLE_G;
             createView.components.b = VK_COMPONENT_SWIZZLE_B;
             createView.components.a = VK_COMPONENT_SWIZZLE_A;
-            createView.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+            createView.subresourceRange = {aspect, 0, 1, 0, 1};
             createView.flags = 0;
             m_targetView.init(*m_device, createView);
         }
@@ -364,7 +372,7 @@ class VkDescriptorSetLayoutObj : public vk_testing::DescriptorSetLayout {
     VkDescriptorSetLayoutObj() = default;
     VkDescriptorSetLayoutObj(const VkDeviceObj *device,
                              const std::vector<VkDescriptorSetLayoutBinding> &descriptor_set_bindings = {},
-                             VkDescriptorSetLayoutCreateFlags flags = 0);
+                             VkDescriptorSetLayoutCreateFlags flags = 0, void *pNext = NULL);
 
     // Move constructor and move assignment operator for Visual Studio 2013
     VkDescriptorSetLayoutObj(VkDescriptorSetLayoutObj &&src) : DescriptorSetLayout(std::move(src)){};
