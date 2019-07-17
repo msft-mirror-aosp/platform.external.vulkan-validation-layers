@@ -25,6 +25,8 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET "10.12" CACHE STRING "Minimum OS X deployment ve
 
 project(Vulkan-ValidationLayers)
 
+enable_testing()
+
 # User-interface declarations ----------------------------------------------------------------------------------------------------
 # This section contains variables that affect development GUIs (e.g. CMake GUI and IDEs), such as option(), folders, and variables
 # with the CACHE property.
@@ -71,8 +73,6 @@ endif()
 if(APPLE)
     # CMake versions 3 or later need CMAKE_MACOSX_RPATH defined. This avoids the CMP0042 policy message.
     set(CMAKE_MACOSX_RPATH 1)
-    # The "install" target for MacOS fixes up bundles in place.
-    set(CMAKE_INSTALL_PREFIX ${CMAKE_BINARY_DIR})
 endif()
 
 # Enable IDE GUI folders
@@ -345,6 +345,7 @@ set_target_properties(VkLayer_utils PROPERTIES LINKER_LANGUAGE CXX)
 add_dependencies(VkLayer_utils VulkanVL_generate_helper_files)
 target_include_directories(VkLayer_utils
                            PUBLIC ${VulkanHeaders_INCLUDE_DIR}
+				  ${CMAKE_CURRENT_SOURCE_DIR}/layers
                                   ${CMAKE_CURRENT_BINARY_DIR}
                                   ${CMAKE_CURRENT_BINARY_DIR}/layers
                                   ${PROJECT_BINARY_DIR})

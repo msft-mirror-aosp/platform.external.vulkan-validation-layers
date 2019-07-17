@@ -134,21 +134,40 @@ directories and place them in any location.
 
 ### Building Dependent Repositories with Known-Good Revisions
 
-There is a Python utility script, `scripts/update_deps.py`, that you can use
-to gather and build the dependent repositories mentioned above. This program
-also uses information stored in the `scripts/known-good.json` file to checkout
-dependent repository revisions that are known to be compatible with the
-revision of this repository that you currently have checked out.
+There is a Python utility script, `scripts/update_deps.py`, that you can use to
+gather and build the dependent repositories mentioned above. This script uses
+information stored in the `scripts/known_good.json` file to check out dependent
+repository revisions that are known to be compatible with the revision of this
+repository that you currently have checked out. As such, this script is useful
+as a quick-start tool for common use cases and default configurations.
 
-Here is a usage example for this repository:
+For all platforms, start with:
 
     git clone git@github.com:KhronosGroup/Vulkan-ValidationLayers.git
     cd Vulkan-ValidationLayers
     mkdir build
     cd build
+
+For 64-bit Linux and MacOS, continue with:
+
     ../scripts/update_deps.py
     cmake -C helper.cmake ..
     cmake --build .
+
+For 64-bit Windows, continue with:
+
+    ..\scripts\update_deps.py --arch x64
+    cmake -A x64 -C helper.cmake ..
+    cmake --build .
+
+For 32-bit Windows, continue with:
+
+    ..\scripts\update_deps.py --arch Win32
+    cmake -A Win32 -C helper.cmake ..
+    cmake --build .
+
+Please see the more detailed build information later in this file if you have
+specific requirements for configuring and building these components.
 
 #### Notes
 
@@ -213,12 +232,11 @@ generate the native platform files.
   - Any Personal Computer version supported by Microsoft
 - Microsoft [Visual Studio](https://www.visualstudio.com/)
   - Versions
-    - [2013 (update 4)](https://www.visualstudio.com/vs/older-downloads/)
     - [2015](https://www.visualstudio.com/vs/older-downloads/)
     - [2017](https://www.visualstudio.com/vs/downloads/)
   - The Community Edition of each of the above versions is sufficient, as
     well as any more capable edition.
-- [CMake](http://www.cmake.org/download/) (Version 2.8.11 or better)
+- CMake: Continuous integration tools use [CMake 3.12.2](https://github.com/Kitware/CMake/releases/tag/v3.12.2) for Windows
   - Use the installer option to add CMake to the system PATH
 - Git Client Support
   - [Git for Windows](http://git-scm.com/download/win) is a popular solution
@@ -376,7 +394,6 @@ include:
 
 | Build Platform               | 64-bit Generator              | 32-bit Generator        |
 |------------------------------|-------------------------------|-------------------------|
-| Microsoft Visual Studio 2013 | "Visual Studio 12 2013 Win64" | "Visual Studio 12 2013" |
 | Microsoft Visual Studio 2015 | "Visual Studio 14 2015 Win64" | "Visual Studio 14 2015" |
 | Microsoft Visual Studio 2017 | "Visual Studio 15 2017 Win64" | "Visual Studio 15 2017" |
 
@@ -401,6 +418,8 @@ versions. Currently, the oldest supported version is Ubuntu 14.04, meaning
 that the minimum supported compiler versions are GCC 4.8.2 and Clang 3.4,
 although earlier versions may work. It should be straightforward to adapt this
 repository to other Linux distributions.
+
+The continuous integration tools use [CMake 3.12.4](https://github.com/Kitware/CMake/releases/tag/v3.12.4) for Linux
 
 #### Required Package List
 
@@ -680,7 +699,7 @@ Follow the setup steps for Linux or OSX above, then from your terminal:
 #### Windows
 
 Follow the setup steps for Windows above, then from Developer Command Prompt
-for VS2013:
+for VS2015:
 
     cd build-android
     update_external_sources_android.bat
@@ -713,6 +732,8 @@ validation tests:
 ### MacOS Build Requirements
 
 Tested on OSX version 10.12.6
+
+The continuous integration tools use [CMake 3.11.3](https://github.com/Kitware/CMake/releases/tag/v3.11.3) for MacOS
 
 Setup Homebrew and components
 
