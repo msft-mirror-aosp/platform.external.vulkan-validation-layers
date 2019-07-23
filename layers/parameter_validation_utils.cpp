@@ -146,6 +146,14 @@ void StatelessValidation::PostCallRecordCreateDevice(VkPhysicalDevice physicalDe
         phys_dev_ext_props.mesh_shader_props = mesh_shader_props;
     }
 
+    if (device_extensions.vk_nv_ray_tracing) {
+        // Get the needed ray tracing limits
+        auto ray_tracing_props = lvl_init_struct<VkPhysicalDeviceRayTracingPropertiesNV>();
+        auto prop2 = lvl_init_struct<VkPhysicalDeviceProperties2KHR>(&ray_tracing_props);
+        DispatchGetPhysicalDeviceProperties2KHR(physicalDevice, &prop2);
+        phys_dev_ext_props.ray_tracing_props = ray_tracing_props;
+    }
+
     stateless_validation->phys_dev_ext_props = this->phys_dev_ext_props;
 
     // Save app-enabled features in this device's validation object
@@ -2330,6 +2338,20 @@ bool StatelessValidation::manual_PreCallValidateCmdDrawIndexedIndirect(VkCommand
     return skip;
 }
 
+bool StatelessValidation::manual_PreCallValidateCmdClearAttachments(VkCommandBuffer commandBuffer, uint32_t attachmentCount,
+                                                                    const VkClearAttachment *pAttachments, uint32_t rectCount,
+                                                                    const VkClearRect *pRects) {
+    bool skip = false;
+    for (uint32_t rect = 0; rect < rectCount; rect++) {
+        if (pRects[rect].layerCount == 0) {
+            skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_COMMAND_BUFFER_EXT,
+                            HandleToUint64(commandBuffer), "VUID-vkCmdClearAttachments-layerCount-01934",
+                            "CmdClearAttachments(): pRects[%d].layerCount is zero.", rect);
+        }
+    }
+    return skip;
+}
+
 bool StatelessValidation::manual_PreCallValidateCmdCopyImage(VkCommandBuffer commandBuffer, VkImage srcImage,
                                                              VkImageLayout srcImageLayout, VkImage dstImage,
                                                              VkImageLayout dstImageLayout, uint32_t regionCount,
@@ -2869,22 +2891,20 @@ bool StatelessValidation::manual_PreCallValidateCmdDrawMeshTasksIndirectNV(VkCom
                                                                            VkDeviceSize offset, uint32_t drawCount,
                                                                            uint32_t stride) {
     bool skip = false;
-
-    if (offset & 3) {
+    static const int condition_multiples = 0b0011;
+    if (offset & condition_multiples) {
         skip |= log_msg(
             report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_COMMAND_BUFFER_EXT,
             HandleToUint64(commandBuffer), "VUID-vkCmdDrawMeshTasksIndirectNV-offset-02710",
             "vkCmdDrawMeshTasksIndirectNV() parameter, VkDeviceSize offset (0x%" PRIxLEAST64 "), is not a multiple of 4.", offset);
     }
-
-    if (drawCount > 1 && ((stride & 3) || stride < sizeof(VkDrawMeshTasksIndirectCommandNV))) {
+    if (drawCount > 1 && ((stride & condition_multiples) || stride < sizeof(VkDrawMeshTasksIndirectCommandNV))) {
         skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_COMMAND_BUFFER_EXT,
                         HandleToUint64(commandBuffer), "VUID-vkCmdDrawMeshTasksIndirectNV-drawCount-02146",
                         "vkCmdDrawMeshTasksIndirectNV() parameter, uint32_t stride (0x%" PRIxLEAST32
                         "), is not a multiple of 4 or smaller than sizeof (VkDrawMeshTasksIndirectCommandNV).",
                         stride);
     }
-
     if (!physical_device_features.multiDrawIndirect && ((drawCount > 1))) {
         skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_COMMAND_BUFFER_EXT,
                         HandleToUint64(commandBuffer), "VUID-vkCmdDrawMeshTasksIndirectNV-drawCount-02718",
@@ -2915,14 +2935,6 @@ bool StatelessValidation::manual_PreCallValidateCmdDrawMeshTasksIndirectCountNV(
                         "vkCmdDrawMeshTasksIndirectCountNV() parameter, VkDeviceSize countBufferOffset (0x%" PRIxLEAST64
                         "), is not a multiple of 4.",
                         countBufferOffset);
-    }
-
-    if ((stride & 3) || stride < sizeof(VkDrawMeshTasksIndirectCommandNV)) {
-        skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_COMMAND_BUFFER_EXT,
-                        HandleToUint64(commandBuffer), "VUID-vkCmdDrawMeshTasksIndirectCountNV-stride-02182",
-                        "vkCmdDrawMeshTasksIndirectCountNV() parameter, uint32_t stride (0x%" PRIxLEAST32
-                        "), is not a multiple of 4 or smaller than sizeof (VkDrawMeshTasksIndirectCommandNV).",
-                        stride);
     }
 
     return skip;
@@ -2992,6 +3004,58 @@ bool StatelessValidation::manual_PreCallValidateAllocateMemory(VkDevice device, 
     return skip;
 }
 
+bool StatelessValidation::ValidateAccelerationStructureInfoNV(const VkAccelerationStructureInfoNV &info) {
+    bool skip = false;
+    if (info.type == VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_NV && info.geometryCount != 0) {
+        skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_ACCELERATION_STRUCTURE_NV_EXT, 0,
+                        "VUID-VkAccelerationStructureInfoNV-type-02425",
+                        "VkAccelerationStructureInfoNV: If type is VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_NV then "
+                        "geometryCount must be 0.");
+    }
+    if (info.type == VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_NV && info.instanceCount != 0) {
+        skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_ACCELERATION_STRUCTURE_NV_EXT, 0,
+                        "VUID-VkAccelerationStructureInfoNV-type-02426",
+                        "VkAccelerationStructureInfoNV: If type is VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_NV then "
+                        "instanceCount must be 0.");
+    }
+    if (info.flags & VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_NV &&
+        info.flags & VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_NV) {
+        skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_ACCELERATION_STRUCTURE_NV_EXT, 0,
+                        "VUID-VkAccelerationStructureInfoNV-flags-02592",
+                        "VkAccelerationStructureInfoNV: If flags has the VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_NV"
+                        "bit set, then it must not have the VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_NV bit set.");
+    }
+    if (info.geometryCount > phys_dev_ext_props.ray_tracing_props.maxGeometryCount) {
+        skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_ACCELERATION_STRUCTURE_NV_EXT, 0,
+                        "VUID-VkAccelerationStructureInfoNV-geometryCount-02422",
+                        "VkAccelerationStructureInfoNV: geometryCount must be less than or equal to "
+                        "VkPhysicalDeviceRayTracingPropertiesNV::maxGeometryCount.");
+    }
+    if (info.instanceCount > phys_dev_ext_props.ray_tracing_props.maxInstanceCount) {
+        skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_ACCELERATION_STRUCTURE_NV_EXT, 0,
+                        "VUID-VkAccelerationStructureInfoNV-instanceCount-02423",
+                        "VkAccelerationStructureInfoNV: instanceCount must be less than or equal to "
+                        "VkPhysicalDeviceRayTracingPropertiesNV::maxInstanceCount.");
+    }
+    if (info.geometryCount > 0) {
+        uint64_t total_triangle_count = 0;
+        for (uint32_t i = 0; i < info.geometryCount; i++) {
+            const VkGeometryNV &geometry = info.pGeometries[i];
+            if (geometry.geometryType != VK_GEOMETRY_TYPE_TRIANGLES_NV) {
+                continue;
+            }
+            total_triangle_count += geometry.geometry.triangles.indexCount / 3;
+        }
+        if (total_triangle_count > phys_dev_ext_props.ray_tracing_props.maxTriangleCount) {
+            skip |= log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_ACCELERATION_STRUCTURE_NV_EXT,
+                            0, "VUID-VkAccelerationStructureInfoNV-maxTriangleCount-02424",
+                            "VkAccelerationStructureInfoNV: The total number of triangles in all geometries must be less than "
+                            "or equal to VkPhysicalDeviceRayTracingPropertiesNV::maxTriangleCount.");
+        }
+    }
+    return skip;
+}
+
 bool StatelessValidation::manual_PreCallValidateCreateAccelerationStructureNV(
     VkDevice device, const VkAccelerationStructureCreateInfoNV *pCreateInfo, const VkAllocationCallbacks *pAllocator,
     VkAccelerationStructureNV *pAccelerationStructure) {
@@ -3006,8 +3070,34 @@ bool StatelessValidation::manual_PreCallValidateCreateAccelerationStructureNV(
                             ") with info.geometryCount (%" PRIu32 ") or info.instanceCount (%" PRIu32 ") nonzero.",
                             pCreateInfo->compactedSize, pCreateInfo->info.geometryCount, pCreateInfo->info.instanceCount);
         }
+
+        skip |= ValidateAccelerationStructureInfoNV(pCreateInfo->info);
     }
 
+    return skip;
+}
+
+bool StatelessValidation::manual_PreCallValidateCmdBuildAccelerationStructureNV(
+    VkCommandBuffer commandBuffer, const VkAccelerationStructureInfoNV *pInfo, VkBuffer instanceData, VkDeviceSize instanceOffset,
+    VkBool32 update, VkAccelerationStructureNV dst, VkAccelerationStructureNV src, VkBuffer scratch, VkDeviceSize scratchOffset) {
+    bool skip = false;
+
+    if (pInfo != nullptr) {
+        skip |= ValidateAccelerationStructureInfoNV(*pInfo);
+    }
+
+    return skip;
+}
+
+bool StatelessValidation::manual_PreCallValidateGetAccelerationStructureHandleNV(VkDevice device,
+                                                                                 VkAccelerationStructureNV accelerationStructure,
+                                                                                 size_t dataSize, void *pData) {
+    bool skip = false;
+    if (dataSize < 8) {
+        skip = log_msg(report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_ACCELERATION_STRUCTURE_NV_EXT,
+                       HandleToUint64(accelerationStructure), "VUID-vkGetAccelerationStructureHandleNV-dataSize-02240",
+                       "vkGetAccelerationStructureHandleNV(): dataSize must be greater than or equal to 8.");
+    }
     return skip;
 }
 

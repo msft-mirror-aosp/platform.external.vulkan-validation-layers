@@ -106,6 +106,8 @@ class HelperFileOutputGenerator(OutputGenerator):
     # Called once at the beginning of each run
     def beginFile(self, genOpts):
         OutputGenerator.beginFile(self, genOpts)
+        # Initialize members that require the tree
+        self.handle_types = GetHandleTypes(self.registry.tree)
         # User-supplied prefix text, if any (list of strings)
         self.helper_file_type = genOpts.helper_file_type
         self.library_name = genOpts.library_name
@@ -302,19 +304,17 @@ class HelperFileOutputGenerator(OutputGenerator):
     # non-dispatchable (dispatchable = False) handle
     def TypeContainsObjectHandle(self, handle_type, dispatchable):
         if dispatchable:
-            type_key = 'VK_DEFINE_HANDLE'
+            type_check = self.handle_types.IsDispatchable
         else:
-            type_key = 'VK_DEFINE_NON_DISPATCHABLE_HANDLE'
-        handle = self.registry.tree.find("types/type/[name='" + handle_type + "'][@category='handle']")
-        if handle is not None and handle.find('type').text == type_key:
+            type_check = self.handle_types.IsNonDispatchable
+        if type_check(handle_type):
             return True
         # if handle_type is a struct, search its members
         if handle_type in self.structNames:
             member_index = next((i for i, v in enumerate(self.structMembers) if v[0] == handle_type), None)
             if member_index is not None:
                 for item in self.structMembers[member_index].members:
-                    handle = self.registry.tree.find("types/type/[name='" + item.type + "'][@category='handle']")
-                    if handle is not None and handle.find('type').text == type_key:
+                    if type_check(item.type):
                         return True
         return False
     #
@@ -377,6 +377,27 @@ class HelperFileOutputGenerator(OutputGenerator):
         outstring += '            return "Unhandled %s";\n' % groupName
         outstring += '    }\n'
         outstring += '}\n'
+
+        bitsIndex = groupName.find('Bits')
+        if (bitsIndex != -1):
+            outstring += '\n'
+            flagsName = groupName[0:bitsIndex] + "s" +  groupName[bitsIndex+4:]
+            outstring += 'static inline std::string string_%s(%s input_value)\n' % (flagsName, flagsName)
+            outstring += '{\n'
+            outstring += '    std::string ret;\n'
+            outstring += '    int index = 0;\n'
+            outstring += '    while(input_value) {\n'
+            outstring += '        if (input_value & 1) {\n'
+            outstring += '            if( !ret.empty()) ret.append("|");\n'
+            outstring += '            ret.append(string_%s(static_cast<%s>(1 << index)));\n' % (groupName, groupName)
+            outstring += '        }\n'
+            outstring += '        ++index;\n'
+            outstring += '        input_value >>= 1;\n'
+            outstring += '    }\n'
+            outstring += '    if( ret.empty()) ret.append(string_%s(static_cast<%s>(0)));\n' % (groupName, groupName)
+            outstring += '    return ret;\n'
+            outstring += '}\n'
+
         if self.featureExtraProtect is not None:
             outstring += '#endif // %s\n' % self.featureExtraProtect
         return outstring
@@ -467,7 +488,11 @@ class HelperFileOutputGenerator(OutputGenerator):
     # Generate extension helper header file
     def GenerateExtensionHelperHeader(self):
 
-        V_1_0_instance_extensions_promoted_to_core = [
+        V_1_1_level_feature_set = [
+            'VK_VERSION_1_1',
+            ]
+
+        V_1_0_instance_extensions_promoted_to_V_1_1_core = [
             'vk_khr_device_group_creation',
             'vk_khr_external_fence_capabilities',
             'vk_khr_external_memory_capabilities',
@@ -475,7 +500,7 @@ class HelperFileOutputGenerator(OutputGenerator):
             'vk_khr_get_physical_device_properties_2',
             ]
 
-        V_1_0_device_extensions_promoted_to_core = [
+        V_1_0_device_extensions_promoted_to_V_1_1_core = [
             'vk_khr_16bit_storage',
             'vk_khr_bind_memory_2',
             'vk_khr_dedicated_allocation',
@@ -505,6 +530,7 @@ class HelperFileOutputGenerator(OutputGenerator):
             '#include <unordered_map>',
             '#include <utility>',
             '#include <set>',
+            '#include <vector>',
             '',
             '#include <vulkan/vulkan.h>',
             '']
@@ -519,17 +545,18 @@ class HelperFileOutputGenerator(OutputGenerator):
             struct_type = '%sExtensions' % type
             if type == 'Instance':
                 extension_dict = self.instance_extension_info
-                promoted_ext_list = V_1_0_instance_extensions_promoted_to_core
+                promoted_ext_list = V_1_0_instance_extensions_promoted_to_V_1_1_core
                 struct_decl = 'struct %s {' % struct_type
                 instance_struct_type = struct_type
             else:
                 extension_dict = self.device_extension_info
-                promoted_ext_list = V_1_0_device_extensions_promoted_to_core
+                promoted_ext_list = V_1_0_device_extensions_promoted_to_V_1_1_core
                 struct_decl = 'struct %s : public %s {' % (struct_type, instance_struct_type)
 
             extension_items = sorted(extension_dict.items())
 
             field_name = { ext_name: re.sub('_extension_name', '', info['define'].lower()) for ext_name, info in extension_items }
+
             if type == 'Instance':
                 instance_field_name = field_name
                 instance_extension_dict = extension_dict
@@ -541,13 +568,8 @@ class HelperFileOutputGenerator(OutputGenerator):
 
             # Output the data member list
             struct  = [struct_decl]
+            struct.extend([ '    bool vk_feature_version_1_1{false};'])
             struct.extend([ '    bool %s{false};' % field_name[ext_name] for ext_name, info in extension_items])
-
-            # Create struct entries for saving extension count and extension list from Instance, DeviceCreateInfo
-            if type == 'Instance':
-                struct.extend([
-                    '',
-                    '    std::unordered_set<std::string> device_extension_set;'])
 
             # Construct the extension information map -- mapping name to data member (field), and required extensions
             # The map is contained within a static function member for portability reasons.
@@ -571,6 +593,8 @@ class HelperFileOutputGenerator(OutputGenerator):
                 '    typedef std::unordered_map<std::string,%s> %s;' % (info_type, info_map_type),
                 '    static const %s &get_info(const char *name) {' %info_type,
                 '        static const %s info_map = {' % info_map_type ])
+            struct.extend([
+                '            std::make_pair("VK_VERSION_1_1", %sInfo(&%sExtensions::vk_feature_version_1_1, {})),' % (type, type)])
 
             field_format = '&' + struct_type + '::%s'
             req_format = '{' + field_format+ ', %s}'
@@ -614,14 +638,10 @@ class HelperFileOutputGenerator(OutputGenerator):
                     '        *this = %s(*instance_extensions);' % struct_type,
                     '']),
             struct.extend([
-                    '',
-                    '        // Save pCreateInfo device extension list',
-                    '        for (uint32_t extn = 0; extn < pCreateInfo->enabledExtensionCount; extn++) {',
-                    '           device_extension_set.insert(pCreateInfo->ppEnabledExtensionNames[extn]);',
-                    '        }',
                 '',
-                '        static const std::vector<const char *> V_1_0_promoted_%s_extensions = {' % type.lower() ])
+                '        static const std::vector<const char *> V_1_1_promoted_%s_apis = {' % type.lower() ])
             struct.extend(['            %s_EXTENSION_NAME,' % ext_name.upper() for ext_name in promoted_ext_list])
+            struct.extend(['            "VK_VERSION_1_1",'])
             struct.extend([
                 '        };',
                 '',
@@ -635,7 +655,7 @@ class HelperFileOutputGenerator(OutputGenerator):
                 '        }',
                 '        uint32_t api_version = NormalizeApiVersion(requested_api_version);',
                 '        if (api_version >= VK_API_VERSION_1_1) {',
-                '            for (auto promoted_ext : V_1_0_promoted_%s_extensions) {' % type.lower(),
+                '            for (auto promoted_ext : V_1_1_promoted_%s_apis) {' % type.lower(),
                 '                auto info = get_info(promoted_ext);',
                 '                assert(info.state);',
                 '                if (info.state) this->*(info.state) = true;',
@@ -687,7 +707,7 @@ class HelperFileOutputGenerator(OutputGenerator):
             type_list.append(enum_entry)
             object_type_info[enum_entry] = { 'VkType': item }
             # We'll want lists of the dispatchable and non dispatchable handles below with access to the same info
-            if IsHandleTypeNonDispatchable(self.registry.tree, item) :
+            if self.handle_types.IsNonDispatchable(item):
                 non_dispatchable[item] = enum_entry
             else:
                 dispatchable[item] = enum_entry
@@ -702,10 +722,9 @@ class HelperFileOutputGenerator(OutputGenerator):
         # Output name string helper
         object_types_header += '// Array of object name strings for OBJECT_TYPE enum conversion\n'
         object_types_header += 'static const char * const object_string[kVulkanObjectTypeMax] = {\n'
-        object_types_header += '    "Unknown",\n'
+        object_types_header += '    "VkNonDispatchableHandle",\n'
         for item in self.object_types:
-            fixup_name = item[2:]
-            object_types_header += '    "%s",\n' % fixup_name
+            object_types_header += '    "%s",\n' % item
         object_types_header += '};\n'
 
         # Key creation helper for map comprehensions that convert between k<Name> and VK<Name> symbols
@@ -816,12 +835,12 @@ class HelperFileOutputGenerator(OutputGenerator):
                                                   vko_type='VK_OBJECT_TYPE_UNKNOWN') + '\n'
         object_types_header += '#endif //  VK_DEFINE_HANDLE logic duplication\n'
 
-        for vk_type, object_type in dispatchable.items():
+        for vk_type, object_type in sorted(dispatchable.items()):
             info = object_type_info[object_type]
             object_types_header += traits_format.format(vk_type=vk_type, obj_type=object_type, dbg_type=info['DbgType'],
                                                       vko_type=info['VkoType'])
         object_types_header += '#ifdef TYPESAFE_NONDISPATCHABLE_HANDLES\n'
-        for vk_type, object_type in non_dispatchable.items():
+        for vk_type, object_type in sorted(non_dispatchable.items()):
             info = object_type_info[object_type]
             object_types_header += traits_format.format(vk_type=vk_type, obj_type=object_type, dbg_type=info['DbgType'],
                                                       vko_type=info['VkoType'])
