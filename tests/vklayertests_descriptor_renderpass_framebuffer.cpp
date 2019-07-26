@@ -53,7 +53,9 @@ TEST_F(VkLayerTest, GpuValidationArrayOOB) {
         vkGetPhysicalDeviceFeatures2KHR(gpu(), &features2);
 
         if (!indexing_features.runtimeDescriptorArray || !indexing_features.descriptorBindingSampledImageUpdateAfterBind ||
-            !indexing_features.descriptorBindingPartiallyBound || !indexing_features.descriptorBindingVariableDescriptorCount) {
+            !indexing_features.descriptorBindingPartiallyBound || !indexing_features.descriptorBindingVariableDescriptorCount ||
+            !indexing_features.shaderSampledImageArrayNonUniformIndexing ||
+            !indexing_features.shaderStorageBufferArrayNonUniformIndexing) {
             printf("Not all descriptor indexing features supported, skipping descriptor indexing tests\n");
             descriptor_indexing = false;
         }
@@ -80,6 +82,11 @@ TEST_F(VkLayerTest, GpuValidationArrayOOB) {
     VkMemoryPropertyFlags mem_props = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     buffer0.init(*m_device, bci, mem_props);
 
+    bci.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    // Make another buffer to populate the buffer array to be indexed
+    VkBufferObj buffer1;
+    buffer1.init(*m_device, bci, mem_props);
+
     void *layout_pnext = nullptr;
     void *allocate_pnext = nullptr;
     auto pool_create_flags = 0;
@@ -100,12 +107,12 @@ TEST_F(VkLayerTest, GpuValidationArrayOOB) {
     }
 
     // Prepare descriptors
-    OneOffDescriptorSet ds(m_device,
-                           {
-                               {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
-                               {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 6, VK_SHADER_STAGE_ALL, nullptr},
-                           },
-                           layout_create_flags, layout_pnext, pool_create_flags);
+    OneOffDescriptorSet descriptor_set(m_device,
+                                       {
+                                           {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                           {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 6, VK_SHADER_STAGE_ALL, nullptr},
+                                       },
+                                       layout_create_flags, layout_pnext, pool_create_flags);
 
     VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variable_count = {};
     uint32_t desc_counts;
@@ -121,15 +128,15 @@ TEST_F(VkLayerTest, GpuValidationArrayOOB) {
         allocate_pnext = &variable_count;
     }
 
-    OneOffDescriptorSet ds_variable(m_device,
-                                    {
-                                        {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                        {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8, VK_SHADER_STAGE_ALL, nullptr},
-                                    },
-                                    layout_create_flags, layout_pnext, pool_create_flags, allocate_pnext);
+    OneOffDescriptorSet descriptor_set_variable(m_device,
+                                                {
+                                                    {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                                    {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8, VK_SHADER_STAGE_ALL, nullptr},
+                                                },
+                                                layout_create_flags, layout_pnext, pool_create_flags, allocate_pnext);
 
-    const VkPipelineLayoutObj pipeline_layout(m_device, {&ds.layout_});
-    const VkPipelineLayoutObj pipeline_layout_variable(m_device, {&ds_variable.layout_});
+    const VkPipelineLayoutObj pipeline_layout(m_device, {&descriptor_set.layout_});
+    const VkPipelineLayoutObj pipeline_layout_variable(m_device, {&descriptor_set_variable.layout_});
     VkTextureObj texture(m_device, nullptr);
     VkSamplerObj sampler(m_device);
 
@@ -147,13 +154,13 @@ TEST_F(VkLayerTest, GpuValidationArrayOOB) {
 
     VkWriteDescriptorSet descriptor_writes[2] = {};
     descriptor_writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptor_writes[0].dstSet = ds.set_;  // descriptor_set;
+    descriptor_writes[0].dstSet = descriptor_set.set_;  // descriptor_set;
     descriptor_writes[0].dstBinding = 0;
     descriptor_writes[0].descriptorCount = 1;
     descriptor_writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     descriptor_writes[0].pBufferInfo = buffer_info;
     descriptor_writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptor_writes[1].dstSet = ds.set_;  // descriptor_set;
+    descriptor_writes[1].dstSet = descriptor_set.set_;  // descriptor_set;
     descriptor_writes[1].dstBinding = 1;
     if (descriptor_indexing)
         descriptor_writes[1].descriptorCount = 5;  // Intentionally don't write index 5
@@ -163,9 +170,50 @@ TEST_F(VkLayerTest, GpuValidationArrayOOB) {
     descriptor_writes[1].pImageInfo = image_info;
     vkUpdateDescriptorSets(m_device->device(), 2, descriptor_writes, 0, NULL);
     if (descriptor_indexing) {
-        descriptor_writes[0].dstSet = ds_variable.set_;
-        descriptor_writes[1].dstSet = ds_variable.set_;
+        descriptor_writes[0].dstSet = descriptor_set_variable.set_;
+        descriptor_writes[1].dstSet = descriptor_set_variable.set_;
         vkUpdateDescriptorSets(m_device->device(), 2, descriptor_writes, 0, NULL);
+    }
+
+    ds_binding_flags[0] = 0;
+    ds_binding_flags[1] = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT_EXT;
+
+    // Resources for buffer tests
+    OneOffDescriptorSet descriptor_set_buffer(m_device,
+                                              {
+                                                  {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                                  {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 6, VK_SHADER_STAGE_ALL, nullptr},
+                                              },
+                                              0, layout_pnext, 0);
+
+    const VkPipelineLayoutObj pipeline_layout_buffer(m_device, {&descriptor_set_buffer.layout_});
+
+    VkDescriptorBufferInfo buffer_test_buffer_info[7] = {};
+    buffer_test_buffer_info[0].buffer = buffer0.handle();
+    buffer_test_buffer_info[0].offset = 0;
+    buffer_test_buffer_info[0].range = sizeof(uint32_t);
+
+    for (int i = 1; i < 7; i++) {
+        buffer_test_buffer_info[i].buffer = buffer1.handle();
+        buffer_test_buffer_info[i].offset = 0;
+        buffer_test_buffer_info[i].range = 4 * sizeof(float);
+    }
+
+    if (descriptor_indexing) {
+        VkWriteDescriptorSet buffer_descriptor_writes[2] = {};
+        buffer_descriptor_writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        buffer_descriptor_writes[0].dstSet = descriptor_set_buffer.set_;  // descriptor_set;
+        buffer_descriptor_writes[0].dstBinding = 0;
+        buffer_descriptor_writes[0].descriptorCount = 1;
+        buffer_descriptor_writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        buffer_descriptor_writes[0].pBufferInfo = buffer_test_buffer_info;
+        buffer_descriptor_writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        buffer_descriptor_writes[1].dstSet = descriptor_set_buffer.set_;  // descriptor_set;
+        buffer_descriptor_writes[1].dstBinding = 1;
+        buffer_descriptor_writes[1].descriptorCount = 5;  // Intentionally don't write index 5
+        buffer_descriptor_writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        buffer_descriptor_writes[1].pBufferInfo = &buffer_test_buffer_info[1];
+        vkUpdateDescriptorSets(m_device->device(), 2, buffer_descriptor_writes, 0, NULL);
     }
 
     // Shader programs for array OOB test in vertex stage:
@@ -200,23 +248,23 @@ TEST_F(VkLayerTest, GpuValidationArrayOOB) {
         "#version 450\n"
         "\n"
         "layout(std140, binding = 0) uniform foo { uint tex_index[1]; } uniform_index_buffer;\n"
-        "layout(location = 0) out flat uint tex_ind;\n"
+        "layout(location = 0) out flat uint index;\n"
         "vec2 vertices[3];\n"
         "void main(){\n"
         "      vertices[0] = vec2(-1.0, -1.0);\n"
         "      vertices[1] = vec2( 1.0, -1.0);\n"
         "      vertices[2] = vec2( 0.0,  1.0);\n"
         "   gl_Position = vec4(vertices[gl_VertexIndex % 3], 0.0, 1.0);\n"
-        "   tex_ind = uniform_index_buffer.tex_index[0];\n"
+        "   index = uniform_index_buffer.tex_index[0];\n"
         "}\n";
     char const *fsSource_frag =
         "#version 450\n"
         "\n"
         "layout(set = 0, binding = 1) uniform sampler2D tex[6];\n"
         "layout(location = 0) out vec4 uFragColor;\n"
-        "layout(location = 0) in flat uint tex_ind;\n"
+        "layout(location = 0) in flat uint index;\n"
         "void main(){\n"
-        "   uFragColor = texture(tex[tex_ind], vec2(0, 0));\n"
+        "   uFragColor = texture(tex[index], vec2(0, 0));\n"
         "}\n";
     char const *fsSource_frag_runtime =
         "#version 450\n"
@@ -224,38 +272,58 @@ TEST_F(VkLayerTest, GpuValidationArrayOOB) {
         "\n"
         "layout(set = 0, binding = 1) uniform sampler2D tex[];\n"
         "layout(location = 0) out vec4 uFragColor;\n"
-        "layout(location = 0) in flat uint tex_ind;\n"
+        "layout(location = 0) in flat uint index;\n"
         "void main(){\n"
-        "   uFragColor = texture(tex[tex_ind], vec2(0, 0));\n"
+        "   uFragColor = texture(tex[index], vec2(0, 0));\n"
+        "}\n";
+    char const *fsSource_buffer =
+        "#version 450\n"
+        "#extension GL_EXT_nonuniform_qualifier : enable\n "
+        "\n"
+        "layout(set = 0, binding = 1) buffer foo { vec4 val; } colors[];\n"
+        "layout(location = 0) out vec4 uFragColor;\n"
+        "layout(location = 0) in flat uint index;\n"
+        "void main(){\n"
+        "   uFragColor = colors[index].val;\n"
         "}\n";
     struct TestCase {
         char const *vertex_source;
         char const *fragment_source;
         bool debug;
-        bool variable_length;
+        const VkPipelineLayoutObj *pipeline_layout;
+        const OneOffDescriptorSet *descriptor_set;
         uint32_t index;
         char const *expected_error;
     };
 
     std::vector<TestCase> tests;
-    tests.push_back({vsSource_vert, fsSource_vert, false, false, 25, "Index of 25 used to index descriptor array of length 6."});
-    tests.push_back({vsSource_frag, fsSource_frag, false, false, 25, "Index of 25 used to index descriptor array of length 6."});
+    tests.push_back({vsSource_vert, fsSource_vert, false, &pipeline_layout, &descriptor_set, 25,
+                     "Index of 25 used to index descriptor array of length 6."});
+    tests.push_back({vsSource_frag, fsSource_frag, false, &pipeline_layout, &descriptor_set, 25,
+                     "Index of 25 used to index descriptor array of length 6."});
 #if !defined(ANDROID)
     // The Android test framework uses shaderc for online compilations.  Even when configured to compile with debug info,
     // shaderc seems to drop the OpLine instructions from the shader binary.  This causes the following two tests to fail
     // on Android platforms.  Skip these tests until the shaderc issue is understood/resolved.
-    tests.push_back({vsSource_vert, fsSource_vert, true, false, 25,
+    tests.push_back({vsSource_vert, fsSource_vert, true, &pipeline_layout, &descriptor_set, 25,
                      "gl_Position += 1e-30 * texture(tex[uniform_index_buffer.tex_index[0]], vec2(0, 0));"});
-    tests.push_back({vsSource_frag, fsSource_frag, true, false, 25, "uFragColor = texture(tex[tex_ind], vec2(0, 0));"});
+    tests.push_back({vsSource_frag, fsSource_frag, true, &pipeline_layout, &descriptor_set, 25,
+                     "uFragColor = texture(tex[index], vec2(0, 0));"});
 #endif
     if (descriptor_indexing) {
-        tests.push_back(
-            {vsSource_frag, fsSource_frag_runtime, false, false, 25, "Index of 25 used to index descriptor array of length 6."});
-        tests.push_back({vsSource_frag, fsSource_frag_runtime, false, false, 5, "Descriptor index 5 is uninitialized"});
+        tests.push_back({vsSource_frag, fsSource_frag_runtime, false, &pipeline_layout, &descriptor_set, 25,
+                         "Index of 25 used to index descriptor array of length 6."});
+        tests.push_back({vsSource_frag, fsSource_frag_runtime, false, &pipeline_layout, &descriptor_set, 5,
+                         "Descriptor index 5 is uninitialized"});
         // Pick 6 below because it is less than the maximum specified, but more than the actual specified
-        tests.push_back(
-            {vsSource_frag, fsSource_frag_runtime, false, true, 6, "Index of 6 used to index descriptor array of length 6."});
-        tests.push_back({vsSource_frag, fsSource_frag_runtime, false, true, 5, "Descriptor index 5 is uninitialized"});
+        tests.push_back({vsSource_frag, fsSource_frag_runtime, false, &pipeline_layout_variable, &descriptor_set_variable, 6,
+                         "Index of 6 used to index descriptor array of length 6."});
+        tests.push_back({vsSource_frag, fsSource_frag_runtime, false, &pipeline_layout_variable, &descriptor_set_variable, 5,
+                         "Descriptor index 5 is uninitialized"});
+        tests.push_back({vsSource_frag, fsSource_buffer, false, &pipeline_layout_buffer, &descriptor_set_buffer, 25,
+                         "Index of 25 used to index descriptor array of length 6."});
+        tests.push_back({vsSource_frag, fsSource_buffer, false, &pipeline_layout_buffer, &descriptor_set_buffer, 5,
+                         "Descriptor index 5 is uninitialized"});
     }
 
     VkViewport viewport = m_viewports[0];
@@ -275,21 +343,13 @@ TEST_F(VkLayerTest, GpuValidationArrayOOB) {
         pipe.AddShader(&vs);
         pipe.AddShader(&fs);
         pipe.AddDefaultColorAttachment();
-        if (iter.variable_length)
-            err = pipe.CreateVKPipeline(pipeline_layout_variable.handle(), renderPass());
-        else
-            err = pipe.CreateVKPipeline(pipeline_layout.handle(), renderPass());
+        err = pipe.CreateVKPipeline(iter.pipeline_layout->handle(), renderPass());
         ASSERT_VK_SUCCESS(err);
         m_commandBuffer->begin();
         m_commandBuffer->BeginRenderPass(m_renderPassBeginInfo);
         vkCmdBindPipeline(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe.handle());
-        if (iter.variable_length) {
-            vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_variable.handle(),
-                                    0, 1, &ds_variable.set_, 0, nullptr);
-        } else {
-            vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout.handle(), 0, 1,
-                                    &ds.set_, 0, nullptr);
-        }
+        vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, iter.pipeline_layout->handle(), 0, 1,
+                                &iter.descriptor_set->set_, 0, nullptr);
         vkCmdSetViewport(m_commandBuffer->handle(), 0, 1, &viewport);
         vkCmdSetScissor(m_commandBuffer->handle(), 0, 1, &scissors);
         vkCmdDraw(m_commandBuffer->handle(), 3, 1, 0, 0);
@@ -304,13 +364,12 @@ TEST_F(VkLayerTest, GpuValidationArrayOOB) {
     }
     return;
 }
-
 TEST_F(VkLayerTest, InvalidDescriptorPoolConsistency) {
     VkResult err;
 
     TEST_DESCRIPTION("Allocate descriptor sets from one DS pool and attempt to delete them from another.");
 
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "FreeDescriptorSets is attempting to free descriptorSet");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkFreeDescriptorSets-pDescriptorSets-parent");
 
     ASSERT_NO_FATAL_FAILURE(Init());
     ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
@@ -331,11 +390,11 @@ TEST_F(VkLayerTest, InvalidDescriptorPoolConsistency) {
     err = vkCreateDescriptorPool(m_device->device(), &ds_pool_ci, NULL, &bad_pool);
     ASSERT_VK_SUCCESS(err);
 
-    OneOffDescriptorSet ds(m_device, {
-                                         {0, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                     });
+    OneOffDescriptorSet descriptor_set(m_device, {
+                                                     {0, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                                 });
 
-    err = vkFreeDescriptorSets(m_device->device(), bad_pool, 1, &ds.set_);
+    err = vkFreeDescriptorSets(m_device->device(), bad_pool, 1, &descriptor_set.set_);
 
     m_errorMonitor->VerifyFound();
 
@@ -379,16 +438,8 @@ TEST_F(VkLayerTest, DrawWithPipelineIncompatibleWithSubpass) {
     err = vkCreateFramebuffer(m_device->device(), &fbci, nullptr, &fb);
     ASSERT_VK_SUCCESS(err);
 
-    char const *vsSource =
-        "#version 450\n"
-        "void main() { gl_Position = vec4(1); }\n";
-    char const *fsSource =
-        "#version 450\n"
-        "layout(location=0) out vec4 color;\n"
-        "void main() { color = vec4(1); }\n";
-
-    VkShaderObj vs(m_device, vsSource, VK_SHADER_STAGE_VERTEX_BIT, this);
-    VkShaderObj fs(m_device, fsSource, VK_SHADER_STAGE_FRAGMENT_BIT, this);
+    VkShaderObj vs(m_device, bindStateVertShaderText, VK_SHADER_STAGE_VERTEX_BIT, this);
+    VkShaderObj fs(m_device, bindStateFragShaderText, VK_SHADER_STAGE_FRAGMENT_BIT, this);
     VkPipelineObj pipe(m_device);
     pipe.AddDefaultColorAttachment();
     pipe.AddShader(&vs);
@@ -950,20 +1001,14 @@ TEST_F(VkLayerTest, RenderPassCreateOverlappingCorrelationMasks) {
 
     // Check for more specific "don't set any correlation masks when multiview is not enabled"
     if (rp2Supported) {
-        PFN_vkCreateRenderPass2KHR vkCreateRenderPass2KHR =
-            (PFN_vkCreateRenderPass2KHR)vkGetDeviceProcAddr(m_device->device(), "vkCreateRenderPass2KHR");
-
         viewMasks[0] = 0;
         correlationMasks[0] = 0;
         correlationMasks[1] = 0;
         safe_VkRenderPassCreateInfo2KHR safe_rpci2;
         ConvertVkRenderPassCreateInfoToV2KHR(&rpci, &safe_rpci2);
 
-        m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkRenderPassCreateInfo2KHR-viewMask-03057");
-        VkRenderPass rp;
-        VkResult err = vkCreateRenderPass2KHR(m_device->device(), safe_rpci2.ptr(), nullptr, &rp);
-        if (err == VK_SUCCESS) vkDestroyRenderPass(m_device->device(), rp, nullptr);
-        m_errorMonitor->VerifyFound();
+        TestRenderPass2KHRCreate(m_errorMonitor, m_device->device(), safe_rpci2.ptr(),
+                                 "VUID-VkRenderPassCreateInfo2KHR-viewMask-03057");
     }
 }
 
@@ -1137,11 +1182,6 @@ TEST_F(VkLayerTest, RenderPassCreate2SubpassInvalidInputAttachmentParameters) {
 
     ASSERT_NO_FATAL_FAILURE(InitState());
 
-    PFN_vkCreateRenderPass2KHR vkCreateRenderPass2KHR =
-        rp2Supported ? (PFN_vkCreateRenderPass2KHR)vkGetDeviceProcAddr(m_device->device(), "vkCreateRenderPass2KHR") : nullptr;
-
-    VkResult err;
-
     VkAttachmentReference2KHR reference = {VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2_KHR, nullptr, VK_ATTACHMENT_UNUSED,
                                            VK_IMAGE_LAYOUT_UNDEFINED, 0};
     VkSubpassDescription2KHR subpass = {VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2_KHR,
@@ -1160,20 +1200,13 @@ TEST_F(VkLayerTest, RenderPassCreate2SubpassInvalidInputAttachmentParameters) {
 
     VkRenderPassCreateInfo2KHR rpci2 = {
         VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2_KHR, nullptr, 0, 0, nullptr, 1, &subpass, 0, nullptr, 0, nullptr};
-    VkRenderPass rp;
 
     // Test for aspect mask of 0
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkSubpassDescription2KHR-aspectMask-03176");
-    err = vkCreateRenderPass2KHR(m_device->device(), &rpci2, nullptr, &rp);
-    if (err == VK_SUCCESS) vkDestroyRenderPass(m_device->device(), rp, nullptr);
-    m_errorMonitor->VerifyFound();
+    TestRenderPass2KHRCreate(m_errorMonitor, m_device->device(), &rpci2, "VUID-VkSubpassDescription2KHR-aspectMask-03176");
 
     // Test for invalid aspect mask bits
     reference.aspectMask |= VK_IMAGE_ASPECT_FLAG_BITS_MAX_ENUM;
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkSubpassDescription2KHR-aspectMask-03175");
-    err = vkCreateRenderPass2KHR(m_device->device(), &rpci2, nullptr, &rp);
-    if (err == VK_SUCCESS) vkDestroyRenderPass(m_device->device(), rp, nullptr);
-    m_errorMonitor->VerifyFound();
+    TestRenderPass2KHRCreate(m_errorMonitor, m_device->device(), &rpci2, "VUID-VkSubpassDescription2KHR-aspectMask-03175");
 }
 
 TEST_F(VkLayerTest, RenderPassCreateInvalidSubpassDependencies) {
@@ -1208,7 +1241,7 @@ TEST_F(VkLayerTest, RenderPassCreateInvalidSubpassDependencies) {
 
     VkSubpassDependency dependency;
     VkRenderPassCreateInfo rpci = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, nullptr, 0, 0, nullptr, 2, subpasses, 1, &dependency};
-    //	dependency = { 0, 1, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, 0 };
+    // dependency = { 0, 1, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, 0 };
 
     // Source subpass is not EXTERNAL, so source stage mask must not include HOST
     dependency = {0, 1, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, 0};
@@ -1338,9 +1371,6 @@ TEST_F(VkLayerTest, RenderPassCreateInvalidSubpassDependencies) {
             rpmvci.pViewOffsets = pViewOffsets;
             pViewOffsets[0] = 1;
             rpmvci.dependencyCount = 1;
-
-            safe_VkRenderPassCreateInfo2KHR safe_rpci2;
-            ConvertVkRenderPassCreateInfoToV2KHR(&rpci, &safe_rpci2);
 
             TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2Supported, nullptr,
                                  "VUID-VkSubpassDependency2KHR-dependencyFlags-03092");
@@ -2580,29 +2610,14 @@ TEST_F(VkLayerTest, WriteDescriptorSetIntegrityCheck) {
     buffCI.queueFamilyIndexCount = 1;
     buffCI.pQueueFamilyIndices = &qfi;
 
-    VkBuffer dyub;
-    err = vkCreateBuffer(m_device->device(), &buffCI, NULL, &dyub);
-    ASSERT_VK_SUCCESS(err);
-
-    VkDeviceMemory mem;
-    VkMemoryRequirements mem_reqs;
-    vkGetBufferMemoryRequirements(m_device->device(), dyub, &mem_reqs);
-
-    VkMemoryAllocateInfo mem_alloc_info = {};
-    mem_alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    mem_alloc_info.allocationSize = mem_reqs.size;
-    m_device->phy().set_memory_type(mem_reqs.memoryTypeBits, &mem_alloc_info, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-    err = vkAllocateMemory(m_device->device(), &mem_alloc_info, NULL, &mem);
-    ASSERT_VK_SUCCESS(err);
-
-    err = vkBindBufferMemory(m_device->device(), dyub, mem, 0);
-    ASSERT_VK_SUCCESS(err);
+    VkBufferObj dynamic_uniform_buffer;
+    dynamic_uniform_buffer.init(*m_device, buffCI);
 
     VkDescriptorBufferInfo buffInfo[2] = {};
-    buffInfo[0].buffer = dyub;
+    buffInfo[0].buffer = dynamic_uniform_buffer.handle();
     buffInfo[0].offset = 0;
     buffInfo[0].range = 1024;
-    buffInfo[1].buffer = dyub;
+    buffInfo[1].buffer = dynamic_uniform_buffer.handle();
     buffInfo[1].offset = 0;
     buffInfo[1].range = 1024;
     descriptor_write.pBufferInfo = buffInfo;
@@ -2645,8 +2660,6 @@ TEST_F(VkLayerTest, WriteDescriptorSetIntegrityCheck) {
     vkUpdateDescriptorSets(m_device->device(), 1, &descriptor_write, 0, NULL);
     m_errorMonitor->VerifyFound();
 
-    vkDestroyBuffer(m_device->device(), dyub, NULL);
-    vkFreeMemory(m_device->device(), mem, NULL);
     vkDestroySampler(m_device->device(), sampler, NULL);
 }
 
@@ -2659,12 +2672,10 @@ TEST_F(VkLayerTest, WriteDescriptorSetConsecutiveUpdates) {
     ASSERT_NO_FATAL_FAILURE(InitViewport());
     ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
 
-    OneOffDescriptorSet ds(m_device, {
-                                         {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2, VK_SHADER_STAGE_ALL, nullptr},
-                                         {1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                     });
-
-    const VkPipelineLayoutObj pipeline_layout(m_device, {&ds.layout_});
+    OneOffDescriptorSet descriptor_set(m_device, {
+                                                     {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2, VK_SHADER_STAGE_ALL, nullptr},
+                                                     {1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                                 });
 
     uint32_t qfi = 0;
     VkBufferCreateInfo bci = {};
@@ -2675,7 +2686,7 @@ TEST_F(VkLayerTest, WriteDescriptorSetConsecutiveUpdates) {
     bci.pQueueFamilyIndices = &qfi;
     VkBufferObj buffer0;
     buffer0.init(*m_device, bci);
-    VkPipelineObj pipe(m_device);
+    CreatePipelineHelper pipe(*this);
     {  // Scope 2nd buffer to cause early destruction
         VkBufferObj buffer1;
         bci.size = 1024;
@@ -2694,7 +2705,7 @@ TEST_F(VkLayerTest, WriteDescriptorSetConsecutiveUpdates) {
 
         VkWriteDescriptorSet descriptor_write = {};
         descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptor_write.dstSet = ds.set_;  // descriptor_set;
+        descriptor_write.dstSet = descriptor_set.set_;  // descriptor_set;
         descriptor_write.dstBinding = 0;
         descriptor_write.descriptorCount = 3;
         descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -2704,12 +2715,6 @@ TEST_F(VkLayerTest, WriteDescriptorSetConsecutiveUpdates) {
         vkUpdateDescriptorSets(m_device->device(), 1, &descriptor_write, 0, NULL);
 
         // Create PSO that uses the uniform buffers
-        char const *vsSource =
-            "#version 450\n"
-            "\n"
-            "void main(){\n"
-            "   gl_Position = vec4(1);\n"
-            "}\n";
         char const *fsSource =
             "#version 450\n"
             "\n"
@@ -2719,22 +2724,26 @@ TEST_F(VkLayerTest, WriteDescriptorSetConsecutiveUpdates) {
             "void main(){\n"
             "   x = vec4(duh.x, bar.y, bar.x, 1);\n"
             "}\n";
-        VkShaderObj vs(m_device, vsSource, VK_SHADER_STAGE_VERTEX_BIT, this);
         VkShaderObj fs(m_device, fsSource, VK_SHADER_STAGE_FRAGMENT_BIT, this);
 
-        pipe.AddShader(&vs);
-        pipe.AddShader(&fs);
-        pipe.AddDefaultColorAttachment();
-
-        VkResult err = pipe.CreateVKPipeline(pipeline_layout.handle(), renderPass());
-        ASSERT_VK_SUCCESS(err);
+        pipe.InitInfo();
+        pipe.shader_stages_ = {pipe.vs_->GetStageCreateInfo(), fs.GetStageCreateInfo()};
+        const VkDynamicState dyn_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+        VkPipelineDynamicStateCreateInfo dyn_state_ci = {};
+        dyn_state_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+        dyn_state_ci.dynamicStateCount = size(dyn_states);
+        dyn_state_ci.pDynamicStates = dyn_states;
+        pipe.dyn_state_ci_ = dyn_state_ci;
+        pipe.InitState();
+        pipe.pipeline_layout_ = VkPipelineLayoutObj(m_device, {&descriptor_set.layout_});
+        pipe.CreateGraphicsPipeline();
 
         m_commandBuffer->begin();
         m_commandBuffer->BeginRenderPass(m_renderPassBeginInfo);
 
-        vkCmdBindPipeline(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe.handle());
-        vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout.handle(), 0, 1,
-                                &ds.set_, 0, nullptr);
+        vkCmdBindPipeline(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe.pipeline_);
+        vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe.pipeline_layout_.handle(), 0, 1,
+                                &descriptor_set.set_, 0, nullptr);
 
         VkViewport viewport = {0, 0, 16, 16, 0, 1};
         vkCmdSetViewport(m_commandBuffer->handle(), 0, 1, &viewport);
@@ -2745,8 +2754,11 @@ TEST_F(VkLayerTest, WriteDescriptorSetConsecutiveUpdates) {
         m_commandBuffer->end();
     }
     // buffer2 just went out of scope and was destroyed along with its memory
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, " that is invalid because bound Buffer ");
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, " that is invalid because bound DeviceMemory ");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
+                                         "UNASSIGNED-CoreValidation-DrawState-InvalidCommandBuffer-VkBuffer");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
+                                         "UNASSIGNED-CoreValidation-DrawState-InvalidCommandBuffer-VkDeviceMemory");
+
     VkSubmitInfo submit_info = {};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit_info.commandBufferCount = 1;
@@ -2763,140 +2775,71 @@ TEST_F(VkLayerTest, InvalidCmdBufferDescriptorSetBufferDestroyed) {
     ASSERT_NO_FATAL_FAILURE(InitViewport());
     ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
 
-    VkDescriptorPoolSize ds_type_count = {};
-    ds_type_count.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    ds_type_count.descriptorCount = 1;
+    CreatePipelineHelper pipe(*this);
+    {
+        // Create a buffer to update the descriptor with
+        uint32_t qfi = 0;
+        VkBufferCreateInfo buffCI = {};
+        buffCI.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        buffCI.size = 1024;
+        buffCI.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        buffCI.queueFamilyIndexCount = 1;
+        buffCI.pQueueFamilyIndices = &qfi;
 
-    VkDescriptorPoolCreateInfo ds_pool_ci = {};
-    ds_pool_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    ds_pool_ci.pNext = NULL;
-    ds_pool_ci.maxSets = 1;
-    ds_pool_ci.poolSizeCount = 1;
-    ds_pool_ci.pPoolSizes = &ds_type_count;
+        VkBufferObj buffer;
+        buffer.init(*m_device, buffCI);
 
-    VkDescriptorPool ds_pool;
-    VkResult err = vkCreateDescriptorPool(m_device->device(), &ds_pool_ci, NULL, &ds_pool);
-    ASSERT_VK_SUCCESS(err);
+        // Create PSO to be used for draw-time errors below
+        char const *fsSource =
+            "#version 450\n"
+            "\n"
+            "layout(location=0) out vec4 x;\n"
+            "layout(set=0) layout(binding=0) uniform foo { int x; int y; } bar;\n"
+            "void main(){\n"
+            "   x = vec4(bar.y);\n"
+            "}\n";
+        VkShaderObj fs(m_device, fsSource, VK_SHADER_STAGE_FRAGMENT_BIT, this);
+        pipe.InitInfo();
+        pipe.shader_stages_ = {pipe.vs_->GetStageCreateInfo(), fs.GetStageCreateInfo()};
+        const VkDynamicState dyn_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+        VkPipelineDynamicStateCreateInfo dyn_state_ci = {};
+        dyn_state_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+        dyn_state_ci.dynamicStateCount = size(dyn_states);
+        dyn_state_ci.pDynamicStates = dyn_states;
+        pipe.dyn_state_ci_ = dyn_state_ci;
+        pipe.InitState();
+        pipe.CreateGraphicsPipeline();
 
-    VkDescriptorSetLayoutBinding dsl_binding = {};
-    dsl_binding.binding = 0;
-    dsl_binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    dsl_binding.descriptorCount = 1;
-    dsl_binding.stageFlags = VK_SHADER_STAGE_ALL;
-    dsl_binding.pImmutableSamplers = NULL;
+        // Correctly update descriptor to avoid "NOT_UPDATED" error
+        pipe.descriptor_set_->WriteDescriptorBufferInfo(0, buffer.handle(), 1024);
+        pipe.descriptor_set_->UpdateDescriptorSets();
 
-    const VkDescriptorSetLayoutObj ds_layout(m_device, {dsl_binding});
+        m_commandBuffer->begin();
+        m_commandBuffer->BeginRenderPass(m_renderPassBeginInfo);
+        vkCmdBindPipeline(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe.pipeline_);
+        vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe.pipeline_layout_.handle(), 0, 1,
+                                &pipe.descriptor_set_->set_, 0, NULL);
 
-    VkDescriptorSet descriptorSet;
-    VkDescriptorSetAllocateInfo alloc_info = {};
-    alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    alloc_info.descriptorSetCount = 1;
-    alloc_info.descriptorPool = ds_pool;
-    alloc_info.pSetLayouts = &ds_layout.handle();
-    err = vkAllocateDescriptorSets(m_device->device(), &alloc_info, &descriptorSet);
-    ASSERT_VK_SUCCESS(err);
+        vkCmdSetViewport(m_commandBuffer->handle(), 0, 1, &m_viewports[0]);
+        vkCmdSetScissor(m_commandBuffer->handle(), 0, 1, &m_scissors[0]);
 
-    const VkPipelineLayoutObj pipeline_layout(m_device, {&ds_layout});
-
-    // Create a buffer to update the descriptor with
-    uint32_t qfi = 0;
-    VkBufferCreateInfo buffCI = {};
-    buffCI.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    buffCI.size = 1024;
-    buffCI.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-    buffCI.queueFamilyIndexCount = 1;
-    buffCI.pQueueFamilyIndices = &qfi;
-
-    VkBuffer buffer;
-    err = vkCreateBuffer(m_device->device(), &buffCI, NULL, &buffer);
-    ASSERT_VK_SUCCESS(err);
-    // Allocate memory and bind to buffer so we can make it to the appropriate
-    // error
-    VkMemoryRequirements memReqs;
-    vkGetBufferMemoryRequirements(m_device->device(), buffer, &memReqs);
-    VkMemoryAllocateInfo mem_alloc = {};
-    mem_alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    mem_alloc.pNext = NULL;
-    mem_alloc.allocationSize = memReqs.size;
-    mem_alloc.memoryTypeIndex = 0;
-    bool pass = m_device->phy().set_memory_type(memReqs.memoryTypeBits, &mem_alloc, 0);
-    if (!pass) {
-        printf("%s Failed to set memory type.\n", kSkipPrefix);
-        vkDestroyBuffer(m_device->device(), buffer, NULL);
-        return;
+        m_commandBuffer->Draw(1, 0, 0, 0);
+        m_commandBuffer->EndRenderPass();
+        m_commandBuffer->end();
     }
-
-    VkDeviceMemory mem;
-    err = vkAllocateMemory(m_device->device(), &mem_alloc, NULL, &mem);
-    ASSERT_VK_SUCCESS(err);
-    err = vkBindBufferMemory(m_device->device(), buffer, mem, 0);
-    ASSERT_VK_SUCCESS(err);
-    // Correctly update descriptor to avoid "NOT_UPDATED" error
-    VkDescriptorBufferInfo buffInfo = {};
-    buffInfo.buffer = buffer;
-    buffInfo.offset = 0;
-    buffInfo.range = 1024;
-
-    VkWriteDescriptorSet descriptor_write;
-    memset(&descriptor_write, 0, sizeof(descriptor_write));
-    descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptor_write.dstSet = descriptorSet;
-    descriptor_write.dstBinding = 0;
-    descriptor_write.descriptorCount = 1;
-    descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    descriptor_write.pBufferInfo = &buffInfo;
-
-    vkUpdateDescriptorSets(m_device->device(), 1, &descriptor_write, 0, NULL);
-
-    // Create PSO to be used for draw-time errors below
-    char const *vsSource =
-        "#version 450\n"
-        "\n"
-        "void main(){\n"
-        "   gl_Position = vec4(1);\n"
-        "}\n";
-    char const *fsSource =
-        "#version 450\n"
-        "\n"
-        "layout(location=0) out vec4 x;\n"
-        "layout(set=0) layout(binding=0) uniform foo { int x; int y; } bar;\n"
-        "void main(){\n"
-        "   x = vec4(bar.y);\n"
-        "}\n";
-    VkShaderObj vs(m_device, vsSource, VK_SHADER_STAGE_VERTEX_BIT, this);
-    VkShaderObj fs(m_device, fsSource, VK_SHADER_STAGE_FRAGMENT_BIT, this);
-    VkPipelineObj pipe(m_device);
-    pipe.AddShader(&vs);
-    pipe.AddShader(&fs);
-    pipe.AddDefaultColorAttachment();
-    pipe.CreateVKPipeline(pipeline_layout.handle(), renderPass());
-
-    m_commandBuffer->begin();
-    m_commandBuffer->BeginRenderPass(m_renderPassBeginInfo);
-    vkCmdBindPipeline(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe.handle());
-    vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout.handle(), 0, 1,
-                            &descriptorSet, 0, NULL);
-
-    vkCmdSetViewport(m_commandBuffer->handle(), 0, 1, &m_viewports[0]);
-    vkCmdSetScissor(m_commandBuffer->handle(), 0, 1, &m_scissors[0]);
-
-    m_commandBuffer->Draw(1, 0, 0, 0);
-    m_commandBuffer->EndRenderPass();
-    m_commandBuffer->end();
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, " that is invalid because bound Buffer ");
     // Destroy buffer should invalidate the cmd buffer, causing error on submit
-    vkDestroyBuffer(m_device->device(), buffer, NULL);
+
     // Attempt to submit cmd buffer
     VkSubmitInfo submit_info = {};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit_info.commandBufferCount = 1;
     submit_info.pCommandBuffers = &m_commandBuffer->handle();
+    // Invalid VkBuffe
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "UNASSIGNED-CoreValidation-DrawState-InvalidCommandBuffe");
+    // Invalid VkDeviceMemory
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, " that is invalid because bound ");
     vkQueueSubmit(m_device->m_queue, 1, &submit_info, VK_NULL_HANDLE);
     m_errorMonitor->VerifyFound();
-    // Cleanup
-    vkFreeMemory(m_device->device(), mem, NULL);
-
-    vkDestroyDescriptorPool(m_device->device(), ds_pool, NULL);
 }
 
 TEST_F(VkLayerTest, InvalidCmdBufferDescriptorSetImageSamplerDestroyed) {
@@ -3038,12 +2981,6 @@ TEST_F(VkLayerTest, InvalidCmdBufferDescriptorSetImageSamplerDestroyed) {
     vkUpdateDescriptorSets(m_device->device(), 1, &descriptor_write, 0, NULL);
 
     // Create PSO to be used for draw-time errors below
-    char const *vsSource =
-        "#version 450\n"
-        "\n"
-        "void main(){\n"
-        "   gl_Position = vec4(1);\n"
-        "}\n";
     char const *fsSource =
         "#version 450\n"
         "\n"
@@ -3052,7 +2989,7 @@ TEST_F(VkLayerTest, InvalidCmdBufferDescriptorSetImageSamplerDestroyed) {
         "void main(){\n"
         "   x = texture(s, vec2(1));\n"
         "}\n";
-    VkShaderObj vs(m_device, vsSource, VK_SHADER_STAGE_VERTEX_BIT, this);
+    VkShaderObj vs(m_device, bindStateVertShaderText, VK_SHADER_STAGE_VERTEX_BIT, this);
     VkShaderObj fs(m_device, fsSource, VK_SHADER_STAGE_FRAGMENT_BIT, this);
     VkPipelineObj pipe(m_device);
     pipe.AddShader(&vs);
@@ -3133,7 +3070,8 @@ TEST_F(VkLayerTest, InvalidCmdBufferDescriptorSetImageSamplerDestroyed) {
     // Destroy sampler invalidates the cmd buffer, causing error on submit
     vkDestroySampler(m_device->device(), sampler, NULL);
     // Attempt to submit cmd buffer
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "that is invalid because bound Sampler");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
+                                         "UNASSIGNED-CoreValidation-DrawState-InvalidCommandBuffer-VkSampler");
     submit_info = {};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit_info.commandBufferCount = 1;
@@ -3148,8 +3086,8 @@ TEST_F(VkLayerTest, InvalidCmdBufferDescriptorSetImageSamplerDestroyed) {
     VkCommandBufferBeginInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     info.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
-
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, " that is invalid because bound Image ");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
+                                         "UNASSIGNED-CoreValidation-DrawState-InvalidCommandBuffer-VkImage");
     m_commandBuffer->begin(&info);
     m_commandBuffer->BeginRenderPass(m_renderPassBeginInfo);
     vkCmdBindPipeline(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe.handle());
@@ -3191,7 +3129,7 @@ TEST_F(VkLayerTest, InvalidCmdBufferDescriptorSetImageSamplerDestroyed) {
     vkQueueSubmit(m_device->m_queue, 1, &submit_info, VK_NULL_HANDLE);
 
     // Immediately try to destroy the descriptor set in the active command buffer - failure expected
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "Cannot call vkFreeDescriptorSets() on descriptor set 0x");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkFreeDescriptorSets-pDescriptorSets-00309");
     vkFreeDescriptorSets(m_device->device(), ds_pool, 1, &descriptorSet);
     m_errorMonitor->VerifyFound();
 
@@ -3209,7 +3147,8 @@ TEST_F(VkLayerTest, InvalidCmdBufferDescriptorSetImageSamplerDestroyed) {
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit_info.commandBufferCount = 1;
     submit_info.pCommandBuffers = &m_commandBuffer->handle();
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, " that is invalid because bound DescriptorSet ");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
+                                         "UNASSIGNED-CoreValidation-DrawState-InvalidCommandBuffer-VkDescriptorSet");
     vkQueueSubmit(m_device->m_queue, 1, &submit_info, VK_NULL_HANDLE);
     m_errorMonitor->VerifyFound();
 
@@ -3228,12 +3167,13 @@ TEST_F(VkLayerTest, InvalidDescriptorSetSamplerDestroyed) {
     ASSERT_NO_FATAL_FAILURE(InitViewport());
     ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
 
-    OneOffDescriptorSet ds(m_device, {
-                                         {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                         {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                     });
+    OneOffDescriptorSet descriptor_set(m_device,
+                                       {
+                                           {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                           {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                       });
 
-    const VkPipelineLayoutObj pipeline_layout(m_device, {&ds.layout_});
+    const VkPipelineLayoutObj pipeline_layout(m_device, {&descriptor_set.layout_});
     // Create images to update the descriptor with
     VkImageObj image(m_device);
     const VkFormat tex_format = VK_FORMAT_B8G8R8A8_UNORM;
@@ -3273,7 +3213,7 @@ TEST_F(VkLayerTest, InvalidDescriptorSetSamplerDestroyed) {
     VkWriteDescriptorSet descriptor_write;
     memset(&descriptor_write, 0, sizeof(descriptor_write));
     descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptor_write.dstSet = ds.set_;
+    descriptor_write.dstSet = descriptor_set.set_;
     descriptor_write.dstBinding = 0;
     descriptor_write.descriptorCount = 1;
     descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -3289,12 +3229,6 @@ TEST_F(VkLayerTest, InvalidDescriptorSetSamplerDestroyed) {
     vkDestroySampler(m_device->device(), sampler1, NULL);
 
     // Create PSO to be used for draw-time errors below
-    char const *vsSource =
-        "#version 450\n"
-        "\n"
-        "void main(){\n"
-        "   gl_Position = vec4(1);\n"
-        "}\n";
     char const *fsSource =
         "#version 450\n"
         "\n"
@@ -3305,7 +3239,7 @@ TEST_F(VkLayerTest, InvalidDescriptorSetSamplerDestroyed) {
         "   x = texture(s, vec2(1));\n"
         "   x = texture(s1, vec2(1));\n"
         "}\n";
-    VkShaderObj vs(m_device, vsSource, VK_SHADER_STAGE_VERTEX_BIT, this);
+    VkShaderObj vs(m_device, bindStateVertShaderText, VK_SHADER_STAGE_VERTEX_BIT, this);
     VkShaderObj fs(m_device, fsSource, VK_SHADER_STAGE_FRAGMENT_BIT, this);
     VkPipelineObj pipe(m_device);
     pipe.AddShader(&vs);
@@ -3317,8 +3251,8 @@ TEST_F(VkLayerTest, InvalidDescriptorSetSamplerDestroyed) {
     m_commandBuffer->begin();
     m_commandBuffer->BeginRenderPass(m_renderPassBeginInfo);
     vkCmdBindPipeline(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe.handle());
-    vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout.handle(), 0, 1, &ds.set_, 0,
-                            NULL);
+    vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout.handle(), 0, 1,
+                            &descriptor_set.set_, 0, NULL);
     VkViewport viewport = {0, 0, 16, 16, 0, 1};
     VkRect2D scissor = {{0, 0}, {16, 16}};
     vkCmdSetViewport(m_commandBuffer->handle(), 0, 1, &viewport);
@@ -3350,12 +3284,13 @@ TEST_F(VkLayerTest, ImageDescriptorLayoutMismatch) {
     ASSERT_NO_FATAL_FAILURE(InitViewport());
     ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
 
-    OneOffDescriptorSet ds(m_device, {
-                                         {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                     });
-    VkDescriptorSet descriptorSet = ds.set_;
+    OneOffDescriptorSet descriptor_set(m_device,
+                                       {
+                                           {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                       });
+    VkDescriptorSet descriptorSet = descriptor_set.set_;
 
-    const VkPipelineLayoutObj pipeline_layout(m_device, {&ds.layout_});
+    const VkPipelineLayoutObj pipeline_layout(m_device, {&descriptor_set.layout_});
 
     // Create image, view, and sampler
     const VkFormat format = VK_FORMAT_B8G8R8A8_UNORM;
@@ -3389,22 +3324,8 @@ TEST_F(VkLayerTest, ImageDescriptorLayoutMismatch) {
     descriptor_write.pImageInfo = &img_info;
 
     // Create PSO to be used for draw-time errors below
-    char const *vsSource =
-        "#version 450\n"
-        "\n"
-        "void main(){\n"
-        "   gl_Position = vec4(1);\n"
-        "}\n";
-    char const *fsSource =
-        "#version 450\n"
-        "\n"
-        "layout(set=0, binding=0) uniform sampler2D s;\n"
-        "layout(location=0) out vec4 x;\n"
-        "void main(){\n"
-        "   x = texture(s, vec2(1));\n"
-        "}\n";
-    VkShaderObj vs(m_device, vsSource, VK_SHADER_STAGE_VERTEX_BIT, this);
-    VkShaderObj fs(m_device, fsSource, VK_SHADER_STAGE_FRAGMENT_BIT, this);
+    VkShaderObj vs(m_device, bindStateVertShaderText, VK_SHADER_STAGE_VERTEX_BIT, this);
+    VkShaderObj fs(m_device, bindStateFragSamplerShaderText, VK_SHADER_STAGE_FRAGMENT_BIT, this);
     VkPipelineObj pipe(m_device);
     pipe.AddShader(&vs);
     pipe.AddShader(&fs);
@@ -3533,40 +3454,12 @@ TEST_F(VkLayerTest, DescriptorPoolInUseResetSignaled) {
     ASSERT_NO_FATAL_FAILURE(InitViewport());
     ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
 
-    VkDescriptorPoolSize ds_type_count = {};
-    ds_type_count.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    ds_type_count.descriptorCount = 1;
+    OneOffDescriptorSet descriptor_set(m_device,
+                                       {
+                                           {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                       });
 
-    VkDescriptorPoolCreateInfo ds_pool_ci = {};
-    ds_pool_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    ds_pool_ci.pNext = nullptr;
-    ds_pool_ci.maxSets = 1;
-    ds_pool_ci.poolSizeCount = 1;
-    ds_pool_ci.pPoolSizes = &ds_type_count;
-
-    VkDescriptorPool ds_pool;
-    VkResult err = vkCreateDescriptorPool(m_device->device(), &ds_pool_ci, nullptr, &ds_pool);
-    ASSERT_VK_SUCCESS(err);
-
-    VkDescriptorSetLayoutBinding dsl_binding = {};
-    dsl_binding.binding = 0;
-    dsl_binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    dsl_binding.descriptorCount = 1;
-    dsl_binding.stageFlags = VK_SHADER_STAGE_ALL;
-    dsl_binding.pImmutableSamplers = nullptr;
-
-    const VkDescriptorSetLayoutObj ds_layout(m_device, {dsl_binding});
-
-    VkDescriptorSet descriptor_set;
-    VkDescriptorSetAllocateInfo alloc_info = {};
-    alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    alloc_info.descriptorSetCount = 1;
-    alloc_info.descriptorPool = ds_pool;
-    alloc_info.pSetLayouts = &ds_layout.handle();
-    err = vkAllocateDescriptorSets(m_device->device(), &alloc_info, &descriptor_set);
-    ASSERT_VK_SUCCESS(err);
-
-    const VkPipelineLayoutObj pipeline_layout(m_device, {&ds_layout});
+    const VkPipelineLayoutObj pipeline_layout(m_device, {&descriptor_set.layout_});
 
     // Create image to update the descriptor with
     VkImageObj image(m_device);
@@ -3577,42 +3470,15 @@ TEST_F(VkLayerTest, DescriptorPoolInUseResetSignaled) {
     // Create Sampler
     VkSamplerCreateInfo sampler_ci = SafeSaneSamplerCreateInfo();
     VkSampler sampler;
-    err = vkCreateSampler(m_device->device(), &sampler_ci, nullptr, &sampler);
+    VkResult err = vkCreateSampler(m_device->device(), &sampler_ci, nullptr, &sampler);
     ASSERT_VK_SUCCESS(err);
     // Update descriptor with image and sampler
-    VkDescriptorImageInfo img_info = {};
-    img_info.sampler = sampler;
-    img_info.imageView = view;
-    img_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-    VkWriteDescriptorSet descriptor_write;
-    memset(&descriptor_write, 0, sizeof(descriptor_write));
-    descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptor_write.dstSet = descriptor_set;
-    descriptor_write.dstBinding = 0;
-    descriptor_write.descriptorCount = 1;
-    descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    descriptor_write.pImageInfo = &img_info;
-
-    vkUpdateDescriptorSets(m_device->device(), 1, &descriptor_write, 0, nullptr);
+    descriptor_set.WriteDescriptorImageInfo(0, view, sampler);
+    descriptor_set.UpdateDescriptorSets();
 
     // Create PSO to be used for draw-time errors below
-    char const *vsSource =
-        "#version 450\n"
-        "\n"
-        "void main(){\n"
-        "   gl_Position = vec4(1);\n"
-        "}\n";
-    char const *fsSource =
-        "#version 450\n"
-        "\n"
-        "layout(set=0, binding=0) uniform sampler2D s;\n"
-        "layout(location=0) out vec4 x;\n"
-        "void main(){\n"
-        "   x = texture(s, vec2(1));\n"
-        "}\n";
-    VkShaderObj vs(m_device, vsSource, VK_SHADER_STAGE_VERTEX_BIT, this);
-    VkShaderObj fs(m_device, fsSource, VK_SHADER_STAGE_FRAGMENT_BIT, this);
+    VkShaderObj vs(m_device, bindStateVertShaderText, VK_SHADER_STAGE_VERTEX_BIT, this);
+    VkShaderObj fs(m_device, bindStateFragSamplerShaderText, VK_SHADER_STAGE_FRAGMENT_BIT, this);
     VkPipelineObj pipe(m_device);
     pipe.AddShader(&vs);
     pipe.AddShader(&fs);
@@ -3623,7 +3489,7 @@ TEST_F(VkLayerTest, DescriptorPoolInUseResetSignaled) {
     m_commandBuffer->BeginRenderPass(m_renderPassBeginInfo);
     vkCmdBindPipeline(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe.handle());
     vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout.handle(), 0, 1,
-                            &descriptor_set, 0, nullptr);
+                            &descriptor_set.set_, 0, nullptr);
 
     VkViewport viewport = {0, 0, 16, 16, 0, 1};
     VkRect2D scissor = {{0, 0}, {16, 16}};
@@ -3641,7 +3507,7 @@ TEST_F(VkLayerTest, DescriptorPoolInUseResetSignaled) {
     vkQueueSubmit(m_device->m_queue, 1, &submit_info, VK_NULL_HANDLE);
     // Reset pool while in-flight, causing error
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkResetDescriptorPool-descriptorPool-00313");
-    vkResetDescriptorPool(m_device->device(), ds_pool, 0);
+    vkResetDescriptorPool(m_device->device(), descriptor_set.pool_, 0);
     m_errorMonitor->VerifyFound();
     vkQueueWaitIdle(m_device->m_queue);
     // Cleanup
@@ -3649,7 +3515,6 @@ TEST_F(VkLayerTest, DescriptorPoolInUseResetSignaled) {
     m_errorMonitor->SetUnexpectedError(
         "If descriptorPool is not VK_NULL_HANDLE, descriptorPool must be a valid VkDescriptorPool handle");
     m_errorMonitor->SetUnexpectedError("Unable to remove DescriptorPool obj");
-    vkDestroyDescriptorPool(m_device->device(), ds_pool, nullptr);
 }
 
 TEST_F(VkLayerTest, DescriptorImageUpdateNoMemoryBound) {
@@ -3658,40 +3523,10 @@ TEST_F(VkLayerTest, DescriptorImageUpdateNoMemoryBound) {
     ASSERT_NO_FATAL_FAILURE(InitViewport());
     ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
 
-    VkDescriptorPoolSize ds_type_count = {};
-    ds_type_count.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    ds_type_count.descriptorCount = 1;
-
-    VkDescriptorPoolCreateInfo ds_pool_ci = {};
-    ds_pool_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    ds_pool_ci.pNext = NULL;
-    ds_pool_ci.maxSets = 1;
-    ds_pool_ci.poolSizeCount = 1;
-    ds_pool_ci.pPoolSizes = &ds_type_count;
-
-    VkDescriptorPool ds_pool;
-    VkResult err = vkCreateDescriptorPool(m_device->device(), &ds_pool_ci, NULL, &ds_pool);
-    ASSERT_VK_SUCCESS(err);
-
-    VkDescriptorSetLayoutBinding dsl_binding = {};
-    dsl_binding.binding = 0;
-    dsl_binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    dsl_binding.descriptorCount = 1;
-    dsl_binding.stageFlags = VK_SHADER_STAGE_ALL;
-    dsl_binding.pImmutableSamplers = NULL;
-
-    const VkDescriptorSetLayoutObj ds_layout(m_device, {dsl_binding});
-
-    VkDescriptorSet descriptorSet;
-    VkDescriptorSetAllocateInfo alloc_info = {};
-    alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    alloc_info.descriptorSetCount = 1;
-    alloc_info.descriptorPool = ds_pool;
-    alloc_info.pSetLayouts = &ds_layout.handle();
-    err = vkAllocateDescriptorSets(m_device->device(), &alloc_info, &descriptorSet);
-    ASSERT_VK_SUCCESS(err);
-
-    const VkPipelineLayoutObj pipeline_layout(m_device, {&ds_layout});
+    OneOffDescriptorSet descriptor_set(m_device,
+                                       {
+                                           {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                       });
 
     // Create images to update the descriptor with
     VkImage image;
@@ -3712,7 +3547,7 @@ TEST_F(VkLayerTest, DescriptorImageUpdateNoMemoryBound) {
     image_create_info.tiling = VK_IMAGE_TILING_OPTIMAL;
     image_create_info.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
     image_create_info.flags = 0;
-    err = vkCreateImage(m_device->device(), &image_create_info, NULL, &image);
+    VkResult err = vkCreateImage(m_device->device(), &image_create_info, NULL, &image);
     ASSERT_VK_SUCCESS(err);
     // Initially bind memory to avoid error at bind view time. We'll break binding before update.
     VkMemoryRequirements memory_reqs;
@@ -3752,32 +3587,19 @@ TEST_F(VkLayerTest, DescriptorImageUpdateNoMemoryBound) {
     err = vkCreateSampler(m_device->device(), &sampler_ci, NULL, &sampler);
     ASSERT_VK_SUCCESS(err);
     // Update descriptor with image and sampler
-    VkDescriptorImageInfo img_info = {};
-    img_info.sampler = sampler;
-    img_info.imageView = view;
-    img_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-    VkWriteDescriptorSet descriptor_write;
-    memset(&descriptor_write, 0, sizeof(descriptor_write));
-    descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptor_write.dstSet = descriptorSet;
-    descriptor_write.dstBinding = 0;
-    descriptor_write.descriptorCount = 1;
-    descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    descriptor_write.pImageInfo = &img_info;
+    descriptor_set.WriteDescriptorImageInfo(0, view, sampler);
     // Break memory binding and attempt update
     vkFreeMemory(m_device->device(), image_memory, nullptr);
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
                                          " previously bound memory was freed. Memory must not be freed prior to this operation.");
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
-                                         "vkUpdateDescriptorSets() failed write update validation for Descriptor Set 0x");
-    vkUpdateDescriptorSets(m_device->device(), 1, &descriptor_write, 0, NULL);
+                                         "vkUpdateDescriptorSets() failed write update validation for ");
+    descriptor_set.UpdateDescriptorSets();
     m_errorMonitor->VerifyFound();
     // Cleanup
     vkDestroyImage(m_device->device(), image, NULL);
     vkDestroySampler(m_device->device(), sampler, NULL);
     vkDestroyImageView(m_device->device(), view, NULL);
-    vkDestroyDescriptorPool(m_device->device(), ds_pool, NULL);
 }
 
 TEST_F(VkLayerTest, InvalidDynamicOffsetCases) {
@@ -3786,7 +3608,6 @@ TEST_F(VkLayerTest, InvalidDynamicOffsetCases) {
     // 1. No dynamicOffset supplied
     // 2. Too many dynamicOffsets supplied
     // 3. Dynamic offset oversteps buffer being updated
-    VkResult err;
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
                                          " requires 1 dynamicOffsets, but only 0 dynamicOffsets are left in pDynamicOffsets ");
 
@@ -3794,40 +3615,12 @@ TEST_F(VkLayerTest, InvalidDynamicOffsetCases) {
     ASSERT_NO_FATAL_FAILURE(InitViewport());
     ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
 
-    VkDescriptorPoolSize ds_type_count = {};
-    ds_type_count.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-    ds_type_count.descriptorCount = 1;
+    OneOffDescriptorSet descriptor_set(m_device,
+                                       {
+                                           {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                       });
 
-    VkDescriptorPoolCreateInfo ds_pool_ci = {};
-    ds_pool_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    ds_pool_ci.pNext = NULL;
-    ds_pool_ci.maxSets = 1;
-    ds_pool_ci.poolSizeCount = 1;
-    ds_pool_ci.pPoolSizes = &ds_type_count;
-
-    VkDescriptorPool ds_pool;
-    err = vkCreateDescriptorPool(m_device->device(), &ds_pool_ci, NULL, &ds_pool);
-    ASSERT_VK_SUCCESS(err);
-
-    VkDescriptorSetLayoutBinding dsl_binding = {};
-    dsl_binding.binding = 0;
-    dsl_binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-    dsl_binding.descriptorCount = 1;
-    dsl_binding.stageFlags = VK_SHADER_STAGE_ALL;
-    dsl_binding.pImmutableSamplers = NULL;
-
-    const VkDescriptorSetLayoutObj ds_layout(m_device, {dsl_binding});
-
-    VkDescriptorSet descriptorSet;
-    VkDescriptorSetAllocateInfo alloc_info = {};
-    alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    alloc_info.descriptorSetCount = 1;
-    alloc_info.descriptorPool = ds_pool;
-    alloc_info.pSetLayouts = &ds_layout.handle();
-    err = vkAllocateDescriptorSets(m_device->device(), &alloc_info, &descriptorSet);
-    ASSERT_VK_SUCCESS(err);
-
-    const VkPipelineLayoutObj pipeline_layout(m_device, {&ds_layout});
+    const VkPipelineLayoutObj pipeline_layout(m_device, {&descriptor_set.layout_});
 
     // Create a buffer to update the descriptor with
     uint32_t qfi = 0;
@@ -3838,79 +3631,32 @@ TEST_F(VkLayerTest, InvalidDynamicOffsetCases) {
     buffCI.queueFamilyIndexCount = 1;
     buffCI.pQueueFamilyIndices = &qfi;
 
-    VkBuffer dyub;
-    err = vkCreateBuffer(m_device->device(), &buffCI, NULL, &dyub);
-    ASSERT_VK_SUCCESS(err);
-    // Allocate memory and bind to buffer so we can make it to the appropriate error
-    VkMemoryRequirements memReqs;
-    vkGetBufferMemoryRequirements(m_device->device(), dyub, &memReqs);
-    VkMemoryAllocateInfo mem_alloc = {};
-    mem_alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    mem_alloc.pNext = NULL;
-    mem_alloc.allocationSize = memReqs.size;
-    mem_alloc.memoryTypeIndex = 0;
-    bool pass = m_device->phy().set_memory_type(memReqs.memoryTypeBits, &mem_alloc, 0);
-    if (!pass) {
-        printf("%s Failed to allocate memory.\n", kSkipPrefix);
-        vkDestroyBuffer(m_device->device(), dyub, NULL);
-        return;
-    }
+    VkBufferObj dynamic_uniform_buffer;
+    dynamic_uniform_buffer.init(*m_device, buffCI);
 
-    VkDeviceMemory mem;
-    err = vkAllocateMemory(m_device->device(), &mem_alloc, NULL, &mem);
-    ASSERT_VK_SUCCESS(err);
-    err = vkBindBufferMemory(m_device->device(), dyub, mem, 0);
-    ASSERT_VK_SUCCESS(err);
     // Correctly update descriptor to avoid "NOT_UPDATED" error
-    VkDescriptorBufferInfo buffInfo = {};
-    buffInfo.buffer = dyub;
-    buffInfo.offset = 0;
-    buffInfo.range = 1024;
-
-    VkWriteDescriptorSet descriptor_write;
-    memset(&descriptor_write, 0, sizeof(descriptor_write));
-    descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptor_write.dstSet = descriptorSet;
-    descriptor_write.dstBinding = 0;
-    descriptor_write.descriptorCount = 1;
-    descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-    descriptor_write.pBufferInfo = &buffInfo;
-
-    vkUpdateDescriptorSets(m_device->device(), 1, &descriptor_write, 0, NULL);
+    descriptor_set.WriteDescriptorBufferInfo(0, dynamic_uniform_buffer.handle(), 1024, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC);
+    descriptor_set.UpdateDescriptorSets();
 
     m_commandBuffer->begin();
     m_commandBuffer->BeginRenderPass(m_renderPassBeginInfo);
     vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout.handle(), 0, 1,
-                            &descriptorSet, 0, NULL);
+                            &descriptor_set.set_, 0, NULL);
     m_errorMonitor->VerifyFound();
     uint32_t pDynOff[2] = {512, 756};
     // Now cause error b/c too many dynOffsets in array for # of dyn descriptors
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
                                          "Attempting to bind 1 descriptorSets with 1 dynamic descriptors, but ");
     vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout.handle(), 0, 1,
-                            &descriptorSet, 2, pDynOff);
+                            &descriptor_set.set_, 2, pDynOff);
     m_errorMonitor->VerifyFound();
     // Finally cause error due to dynamicOffset being too big
     m_errorMonitor->SetDesiredFailureMsg(
         VK_DEBUG_REPORT_ERROR_BIT_EXT,
         " dynamic offset 512 combined with offset 0 and range 1024 that oversteps the buffer size of 1024");
     // Create PSO to be used for draw-time errors below
-    char const *vsSource =
-        "#version 450\n"
-        "\n"
-        "void main(){\n"
-        "   gl_Position = vec4(1);\n"
-        "}\n";
-    char const *fsSource =
-        "#version 450\n"
-        "\n"
-        "layout(location=0) out vec4 x;\n"
-        "layout(set=0) layout(binding=0) uniform foo { int x; int y; } bar;\n"
-        "void main(){\n"
-        "   x = vec4(bar.y);\n"
-        "}\n";
-    VkShaderObj vs(m_device, vsSource, VK_SHADER_STAGE_VERTEX_BIT, this);
-    VkShaderObj fs(m_device, fsSource, VK_SHADER_STAGE_FRAGMENT_BIT, this);
+    VkShaderObj vs(m_device, bindStateVertShaderText, VK_SHADER_STAGE_VERTEX_BIT, this);
+    VkShaderObj fs(m_device, bindStateFragUniformShaderText, VK_SHADER_STAGE_FRAGMENT_BIT, this);
     VkPipelineObj pipe(m_device);
     pipe.AddShader(&vs);
     pipe.AddShader(&fs);
@@ -3926,17 +3672,12 @@ TEST_F(VkLayerTest, InvalidDynamicOffsetCases) {
     // This update should succeed, but offset size of 512 will overstep buffer
     // /w range 1024 & size 1024
     vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout.handle(), 0, 1,
-                            &descriptorSet, 1, pDynOff);
+                            &descriptor_set.set_, 1, pDynOff);
     m_commandBuffer->Draw(1, 0, 0, 0);
     m_errorMonitor->VerifyFound();
 
     m_commandBuffer->EndRenderPass();
     m_commandBuffer->end();
-
-    vkDestroyBuffer(m_device->device(), dyub, NULL);
-    vkFreeMemory(m_device->device(), mem, NULL);
-
-    vkDestroyDescriptorPool(m_device->device(), ds_pool, NULL);
 }
 
 TEST_F(VkLayerTest, DescriptorBufferUpdateNoMemoryBound) {
@@ -3945,44 +3686,16 @@ TEST_F(VkLayerTest, DescriptorBufferUpdateNoMemoryBound) {
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
                                          " used with no memory bound. Memory should be bound by calling vkBindBufferMemory().");
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
-                                         "vkUpdateDescriptorSets() failed write update validation for Descriptor Set 0x");
+                                         "vkUpdateDescriptorSets() failed write update validation for ");
 
     ASSERT_NO_FATAL_FAILURE(Init());
     ASSERT_NO_FATAL_FAILURE(InitViewport());
     ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
 
-    VkDescriptorPoolSize ds_type_count = {};
-    ds_type_count.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-    ds_type_count.descriptorCount = 1;
-
-    VkDescriptorPoolCreateInfo ds_pool_ci = {};
-    ds_pool_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    ds_pool_ci.pNext = NULL;
-    ds_pool_ci.maxSets = 1;
-    ds_pool_ci.poolSizeCount = 1;
-    ds_pool_ci.pPoolSizes = &ds_type_count;
-
-    VkDescriptorPool ds_pool;
-    err = vkCreateDescriptorPool(m_device->device(), &ds_pool_ci, NULL, &ds_pool);
-    ASSERT_VK_SUCCESS(err);
-
-    VkDescriptorSetLayoutBinding dsl_binding = {};
-    dsl_binding.binding = 0;
-    dsl_binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-    dsl_binding.descriptorCount = 1;
-    dsl_binding.stageFlags = VK_SHADER_STAGE_ALL;
-    dsl_binding.pImmutableSamplers = NULL;
-
-    const VkDescriptorSetLayoutObj ds_layout(m_device, {dsl_binding});
-
-    VkDescriptorSet descriptorSet;
-    VkDescriptorSetAllocateInfo alloc_info = {};
-    alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    alloc_info.descriptorSetCount = 1;
-    alloc_info.descriptorPool = ds_pool;
-    alloc_info.pSetLayouts = &ds_layout.handle();
-    err = vkAllocateDescriptorSets(m_device->device(), &alloc_info, &descriptorSet);
-    ASSERT_VK_SUCCESS(err);
+    OneOffDescriptorSet descriptor_set(m_device,
+                                       {
+                                           {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                       });
 
     // Create a buffer to update the descriptor with
     uint32_t qfi = 0;
@@ -3993,30 +3706,15 @@ TEST_F(VkLayerTest, DescriptorBufferUpdateNoMemoryBound) {
     buffCI.queueFamilyIndexCount = 1;
     buffCI.pQueueFamilyIndices = &qfi;
 
-    VkBuffer dyub;
-    err = vkCreateBuffer(m_device->device(), &buffCI, NULL, &dyub);
+    VkBuffer dynamic_uniform_buffer;
+    err = vkCreateBuffer(m_device->device(), &buffCI, NULL, &dynamic_uniform_buffer);
     ASSERT_VK_SUCCESS(err);
 
     // Attempt to update descriptor without binding memory to it
-    VkDescriptorBufferInfo buffInfo = {};
-    buffInfo.buffer = dyub;
-    buffInfo.offset = 0;
-    buffInfo.range = 1024;
-
-    VkWriteDescriptorSet descriptor_write;
-    memset(&descriptor_write, 0, sizeof(descriptor_write));
-    descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptor_write.dstSet = descriptorSet;
-    descriptor_write.dstBinding = 0;
-    descriptor_write.descriptorCount = 1;
-    descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-    descriptor_write.pBufferInfo = &buffInfo;
-
-    vkUpdateDescriptorSets(m_device->device(), 1, &descriptor_write, 0, NULL);
+    descriptor_set.WriteDescriptorBufferInfo(0, dynamic_uniform_buffer, 1024, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC);
+    descriptor_set.UpdateDescriptorSets();
     m_errorMonitor->VerifyFound();
-
-    vkDestroyBuffer(m_device->device(), dyub, NULL);
-    vkDestroyDescriptorPool(m_device->device(), ds_pool, NULL);
+    vkDestroyBuffer(m_device->device(), dynamic_uniform_buffer, NULL);
 }
 
 TEST_F(VkLayerTest, DescriptorSetCompatibility) {
@@ -4151,22 +3849,8 @@ TEST_F(VkLayerTest, DescriptorSetCompatibility) {
     vkUpdateDescriptorSets(m_device->device(), 1, &descriptor_write, 0, NULL);
 
     // Create PSO to be used for draw-time errors below
-    char const *vsSource =
-        "#version 450\n"
-        "\n"
-        "void main(){\n"
-        "   gl_Position = vec4(1);\n"
-        "}\n";
-    char const *fsSource =
-        "#version 450\n"
-        "\n"
-        "layout(location=0) out vec4 x;\n"
-        "layout(set=0) layout(binding=0) uniform foo { int x; int y; } bar;\n"
-        "void main(){\n"
-        "   x = vec4(bar.y);\n"
-        "}\n";
-    VkShaderObj vs(m_device, vsSource, VK_SHADER_STAGE_VERTEX_BIT, this);
-    VkShaderObj fs(m_device, fsSource, VK_SHADER_STAGE_FRAGMENT_BIT, this);
+    VkShaderObj vs(m_device, bindStateVertShaderText, VK_SHADER_STAGE_VERTEX_BIT, this);
+    VkShaderObj fs(m_device, bindStateFragUniformShaderText, VK_SHADER_STAGE_FRAGMENT_BIT, this);
     VkPipelineObj pipe(m_device);
     pipe.AddShader(&vs);
     pipe.AddShader(&fs);
@@ -4272,8 +3956,7 @@ TEST_F(VkLayerTest, NullRenderPass) {
 TEST_F(VkLayerTest, EndCommandBufferWithinRenderPass) {
     TEST_DESCRIPTION("End a command buffer with an active render pass");
 
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
-                                         "It is invalid to issue this call inside an active render pass");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkEndCommandBuffer-commandBuffer-00060");
 
     ASSERT_NO_FATAL_FAILURE(Init());
     ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
@@ -4373,17 +4056,17 @@ TEST_F(VkLayerTest, DSUsageBitsErrors) {
 
     // These error messages align with VkDescriptorType struct
     std::string error_codes[] = {
-        "VUID-VkWriteDescriptorSet-descriptorType-00326",  // placeholder, no error for SAMPLER descriptor
-        "VUID-VkWriteDescriptorSet-descriptorType-00326",  // COMBINED_IMAGE_SAMPLER
-        "VUID-VkWriteDescriptorSet-descriptorType-00326",  // SAMPLED_IMAGE
-        "VUID-VkWriteDescriptorSet-descriptorType-00326",  // STORAGE_IMAGE
-        "VUID-VkWriteDescriptorSet-descriptorType-00334",  // UNIFORM_TEXEL_BUFFER
-        "VUID-VkWriteDescriptorSet-descriptorType-00335",  // STORAGE_TEXEL_BUFFER
-        "VUID-VkWriteDescriptorSet-descriptorType-00330",  // UNIFORM_BUFFER
-        "VUID-VkWriteDescriptorSet-descriptorType-00331",  // STORAGE_BUFFER
-        "VUID-VkWriteDescriptorSet-descriptorType-00330",  // UNIFORM_BUFFER_DYNAMIC
-        "VUID-VkWriteDescriptorSet-descriptorType-00331",  // STORAGE_BUFFER_DYNAMIC
-        "VUID-VkWriteDescriptorSet-descriptorType-00326"   // INPUT_ATTACHMENT
+        "UNASSIGNED-CoreValidation-DrawState-InvalidImageView",  // placeholder, no error for SAMPLER descriptor
+        "UNASSIGNED-CoreValidation-DrawState-InvalidImageView",  // COMBINED_IMAGE_SAMPLER
+        "UNASSIGNED-CoreValidation-DrawState-InvalidImageView",  // SAMPLED_IMAGE
+        "UNASSIGNED-CoreValidation-DrawState-InvalidImageView",  // STORAGE_IMAGE
+        "VUID-VkWriteDescriptorSet-descriptorType-00334",        // UNIFORM_TEXEL_BUFFER
+        "VUID-VkWriteDescriptorSet-descriptorType-00335",        // STORAGE_TEXEL_BUFFER
+        "VUID-VkWriteDescriptorSet-descriptorType-00330",        // UNIFORM_BUFFER
+        "VUID-VkWriteDescriptorSet-descriptorType-00331",        // STORAGE_BUFFER
+        "VUID-VkWriteDescriptorSet-descriptorType-00330",        // UNIFORM_BUFFER_DYNAMIC
+        "VUID-VkWriteDescriptorSet-descriptorType-00331",        // STORAGE_BUFFER_DYNAMIC
+        "UNASSIGNED-CoreValidation-DrawState-InvalidImageView"   // INPUT_ATTACHMENT
     };
     // Start loop at 1 as SAMPLER desc type has no usage bit error
     for (uint32_t i = 1; i < VK_DESCRIPTOR_TYPE_RANGE_SIZE; ++i) {
@@ -4410,7 +4093,6 @@ TEST_F(VkLayerTest, DSBufferInfoErrors) {
         "1. offset value greater than or equal to buffer size\n"
         "2. range value of 0\n"
         "3. range value greater than buffer (size - offset)");
-    VkResult err;
 
     // GPDDP2 needed for push descriptors support below
     bool gpdp2_support = InstanceExtensionSupported(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
@@ -4440,7 +4122,7 @@ TEST_F(VkLayerTest, DSBufferInfoErrors) {
 
     std::vector<VkDescriptorSetLayoutBinding> ds_bindings = {
         {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr}};
-    OneOffDescriptorSet ds(m_device, ds_bindings);
+    OneOffDescriptorSet descriptor_set(m_device, ds_bindings);
 
     // Create a buffer to be used for invalid updates
     VkBufferCreateInfo buff_ci = {};
@@ -4448,33 +4130,11 @@ TEST_F(VkLayerTest, DSBufferInfoErrors) {
     buff_ci.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
     buff_ci.size = m_device->props.limits.minUniformBufferOffsetAlignment;
     buff_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    VkBuffer buffer;
-    err = vkCreateBuffer(m_device->device(), &buff_ci, NULL, &buffer);
-    ASSERT_VK_SUCCESS(err);
-
-    // Have to bind memory to buffer before descriptor update
-    VkMemoryRequirements mem_reqs;
-    vkGetBufferMemoryRequirements(m_device->device(), buffer, &mem_reqs);
-    VkMemoryAllocateInfo mem_alloc = {};
-    mem_alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    mem_alloc.pNext = NULL;
-    mem_alloc.allocationSize = mem_reqs.size;
-    mem_alloc.memoryTypeIndex = 0;
-    bool pass = m_device->phy().set_memory_type(mem_reqs.memoryTypeBits, &mem_alloc, 0);
-    if (!pass) {
-        printf("%s Failed to allocate memory.\n", kSkipPrefix);
-        vkDestroyBuffer(m_device->device(), buffer, NULL);
-        return;
-    }
-
-    VkDeviceMemory mem;
-    err = vkAllocateMemory(m_device->device(), &mem_alloc, NULL, &mem);
-    ASSERT_VK_SUCCESS(err);
-    err = vkBindBufferMemory(m_device->device(), buffer, mem, 0);
-    ASSERT_VK_SUCCESS(err);
+    VkBufferObj buffer;
+    buffer.init(*m_device, buff_ci);
 
     VkDescriptorBufferInfo buff_info = {};
-    buff_info.buffer = buffer;
+    buff_info.buffer = buffer.handle();
     VkWriteDescriptorSet descriptor_write = {};
     descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     descriptor_write.dstBinding = 0;
@@ -4484,7 +4144,7 @@ TEST_F(VkLayerTest, DSBufferInfoErrors) {
     descriptor_write.pImageInfo = nullptr;
 
     descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    descriptor_write.dstSet = ds.set_;
+    descriptor_write.dstSet = descriptor_set.set_;
 
     // Relying on the "return nullptr for non-enabled extensions
     auto vkCreateDescriptorUpdateTemplateKHR =
@@ -4521,7 +4181,7 @@ TEST_F(VkLayerTest, DSBufferInfoErrors) {
     update_template_ci.descriptorUpdateEntryCount = 1;
     update_template_ci.pDescriptorUpdateEntries = &update_template_entry;
     update_template_ci.templateType = VK_DESCRIPTOR_UPDATE_TEMPLATE_TYPE_DESCRIPTOR_SET;
-    update_template_ci.descriptorSetLayout = ds.layout_.handle();
+    update_template_ci.descriptorSetLayout = descriptor_set.layout_.handle();
 
     VkDescriptorUpdateTemplate update_template = VK_NULL_HANDLE;
     if (update_template_support) {
@@ -4577,7 +4237,7 @@ TEST_F(VkLayerTest, DSBufferInfoErrors) {
         if (update_template_support) {
             update_template_data.buff_info = buff_info;  // copy the test case information into our "pData"
             m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, desired_failure);
-            vkUpdateDescriptorSetWithTemplateKHR(m_device->device(), ds.set_, update_template, &update_template_data);
+            vkUpdateDescriptorSetWithTemplateKHR(m_device->device(), descriptor_set.set_, update_template, &update_template_data);
             m_errorMonitor->VerifyFound();
             if (push_descriptor_support) {
                 m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, desired_failure);
@@ -4611,8 +4271,6 @@ TEST_F(VkLayerTest, DSBufferInfoErrors) {
             vkDestroyDescriptorUpdateTemplateKHR(m_device->device(), push_template, nullptr);
         }
     }
-    vkFreeMemory(m_device->device(), mem, NULL);
-    vkDestroyBuffer(m_device->device(), buffer, NULL);
 }
 
 TEST_F(VkLayerTest, DSBufferLimitErrors) {
@@ -4625,7 +4283,6 @@ TEST_F(VkLayerTest, DSBufferLimitErrors) {
         "4. range of storage buffer update exceeds maxStorageBufferRange\n"
         "5. offset of storage buffer update is not multiple of minStorageBufferOffsetAlignment\n"
         "6. using VK_WHOLE_SIZE with storage buffer size exceeding maxStorageBufferRange");
-    VkResult err;
 
     ASSERT_NO_FATAL_FAILURE(Init());
 
@@ -4647,9 +4304,9 @@ TEST_F(VkLayerTest, DSBufferLimitErrors) {
                        m_device->props.limits.minStorageBufferOffsetAlignment, "VUID-VkWriteDescriptorSet-descriptorType-00328"}),
          }) {
         // Create layout with single buffer
-        OneOffDescriptorSet ds(m_device, {
-                                             {0, test_case.descriptor_type, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                         });
+        OneOffDescriptorSet descriptor_set(m_device, {
+                                                         {0, test_case.descriptor_type, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                                     });
 
         // Create a buffer to be used for invalid updates
         VkBufferCreateInfo bci = {};
@@ -4658,7 +4315,7 @@ TEST_F(VkLayerTest, DSBufferLimitErrors) {
         bci.size = test_case.max_range + test_case.min_align;  // Make buffer bigger than range limit
         bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         VkBuffer buffer;
-        err = vkCreateBuffer(m_device->device(), &bci, NULL, &buffer);
+        VkResult err = vkCreateBuffer(m_device->device(), &bci, NULL, &buffer);
         ASSERT_VK_SUCCESS(err);
 
         // Have to bind memory to buffer before descriptor update
@@ -4696,7 +4353,7 @@ TEST_F(VkLayerTest, DSBufferLimitErrors) {
         descriptor_write.pBufferInfo = &buff_info;
         descriptor_write.pImageInfo = nullptr;
         descriptor_write.descriptorType = test_case.descriptor_type;
-        descriptor_write.dstSet = ds.set_;
+        descriptor_write.dstSet = descriptor_set.set_;
 
         // Exceed range limit
         if (test_case.max_range != UINT32_MAX) {
@@ -4742,9 +4399,9 @@ TEST_F(VkLayerTest, DSAspectBitsErrors) {
         return;
     }
 
-    OneOffDescriptorSet ds(m_device, {
-                                         {0, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                     });
+    OneOffDescriptorSet descriptor_set(m_device, {
+                                                     {0, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                                 });
 
     // Create an image to be used for invalid updates
     VkImageObj image_obj(m_device);
@@ -4775,25 +4432,11 @@ TEST_F(VkLayerTest, DSAspectBitsErrors) {
     VkImageView image_view;
     err = vkCreateImageView(m_device->device(), &image_view_ci, NULL, &image_view);
     ASSERT_VK_SUCCESS(err);
+    descriptor_set.WriteDescriptorImageInfo(0, image_view, VK_NULL_HANDLE, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT);
 
-    VkDescriptorImageInfo img_info = {};
-    img_info.imageView = image_view;
-    VkWriteDescriptorSet descriptor_write = {};
-    descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptor_write.dstBinding = 0;
-    descriptor_write.descriptorCount = 1;
-    descriptor_write.pTexelBufferView = NULL;
-    descriptor_write.pBufferInfo = NULL;
-    descriptor_write.pImageInfo = &img_info;
-    descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
-    descriptor_write.dstSet = ds.set_;
-    // TODO(whenning42): Update this check to look for a VUID when this error is
-    // assigned one.
-    const char *error_msg = " please only set either VK_IMAGE_ASPECT_DEPTH_BIT or VK_IMAGE_ASPECT_STENCIL_BIT ";
+    const char *error_msg = "VUID-VkDescriptorImageInfo-imageView-01976";
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, error_msg);
-
-    vkUpdateDescriptorSets(m_device->device(), 1, &descriptor_write, 0, NULL);
-
+    descriptor_set.UpdateDescriptorSets();
     m_errorMonitor->VerifyFound();
     vkDestroyImageView(m_device->device(), image_view, NULL);
 }
@@ -4807,28 +4450,17 @@ TEST_F(VkLayerTest, DSTypeMismatch) {
         " binding #0 with type VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER but update type is VK_DESCRIPTOR_TYPE_SAMPLER");
 
     ASSERT_NO_FATAL_FAILURE(Init());
-    OneOffDescriptorSet ds(m_device, {
-                                         {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                     });
+    OneOffDescriptorSet descriptor_set(m_device, {
+                                                     {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                                 });
 
     VkSamplerCreateInfo sampler_ci = SafeSaneSamplerCreateInfo();
     VkSampler sampler;
     err = vkCreateSampler(m_device->device(), &sampler_ci, NULL, &sampler);
     ASSERT_VK_SUCCESS(err);
 
-    VkDescriptorImageInfo info = {};
-    info.sampler = sampler;
-
-    VkWriteDescriptorSet descriptor_write;
-    memset(&descriptor_write, 0, sizeof(descriptor_write));
-    descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptor_write.dstSet = ds.set_;
-    descriptor_write.descriptorCount = 1;
-    // This is a mismatched type for the layout which expects BUFFER
-    descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-    descriptor_write.pImageInfo = &info;
-
-    vkUpdateDescriptorSets(m_device->device(), 1, &descriptor_write, 0, NULL);
+    descriptor_set.WriteDescriptorImageInfo(0, VK_NULL_HANDLE, sampler, VK_DESCRIPTOR_TYPE_SAMPLER);
+    descriptor_set.UpdateDescriptorSets();
 
     m_errorMonitor->VerifyFound();
 
@@ -4840,9 +4472,9 @@ TEST_F(VkLayerTest, DSUpdateOutOfBounds) {
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkWriteDescriptorSet-dstArrayElement-00321");
 
     ASSERT_NO_FATAL_FAILURE(Init());
-    OneOffDescriptorSet ds(m_device, {
-                                         {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                     });
+    OneOffDescriptorSet descriptor_set(m_device, {
+                                                     {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                                 });
 
     VkBufferTest buffer_test(m_device, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     if (!buffer_test.GetBufferCurrent()) {
@@ -4860,7 +4492,7 @@ TEST_F(VkLayerTest, DSUpdateOutOfBounds) {
     VkWriteDescriptorSet descriptor_write;
     memset(&descriptor_write, 0, sizeof(descriptor_write));
     descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptor_write.dstSet = ds.set_;
+    descriptor_write.dstSet = descriptor_set.set_;
     descriptor_write.dstArrayElement = 1; /* This index out of bounds for the update */
     descriptor_write.descriptorCount = 1;
     descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -4878,30 +4510,18 @@ TEST_F(VkLayerTest, InvalidDSUpdateIndex) {
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkWriteDescriptorSet-dstBinding-00315");
 
     ASSERT_NO_FATAL_FAILURE(Init());
-    OneOffDescriptorSet ds(m_device, {
-                                         {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                     });
+    OneOffDescriptorSet descriptor_set(m_device, {
+                                                     {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                                 });
 
     VkSamplerCreateInfo sampler_ci = SafeSaneSamplerCreateInfo();
     VkSampler sampler;
     err = vkCreateSampler(m_device->device(), &sampler_ci, NULL, &sampler);
     ASSERT_VK_SUCCESS(err);
 
-    VkDescriptorImageInfo info = {};
-    info.sampler = sampler;
-
-    VkWriteDescriptorSet descriptor_write;
-    memset(&descriptor_write, 0, sizeof(descriptor_write));
-    descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptor_write.dstSet = ds.set_;
-    descriptor_write.dstBinding = 2;
-    descriptor_write.descriptorCount = 1;
     // This is the wrong type, but out of bounds will be flagged first
-    descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-    descriptor_write.pImageInfo = &info;
-
-    vkUpdateDescriptorSets(m_device->device(), 1, &descriptor_write, 0, NULL);
-
+    descriptor_set.WriteDescriptorImageInfo(2, VK_NULL_HANDLE, sampler, VK_DESCRIPTOR_TYPE_SAMPLER);
+    descriptor_set.UpdateDescriptorSets();
     m_errorMonitor->VerifyFound();
 
     vkDestroySampler(m_device->device(), sampler, NULL);
@@ -4913,30 +4533,21 @@ TEST_F(VkLayerTest, DSUpdateEmptyBinding) {
 
     ASSERT_NO_FATAL_FAILURE(Init());
 
-    OneOffDescriptorSet ds(m_device, {
-                                         {0, VK_DESCRIPTOR_TYPE_SAMPLER, 0 /* !! */, VK_SHADER_STAGE_ALL, nullptr},
-                                     });
+    OneOffDescriptorSet descriptor_set(m_device, {
+                                                     {0, VK_DESCRIPTOR_TYPE_SAMPLER, 0 /* !! */, VK_SHADER_STAGE_ALL, nullptr},
+                                                 });
 
     VkSamplerCreateInfo sampler_ci = SafeSaneSamplerCreateInfo();
     VkSampler sampler;
     err = vkCreateSampler(m_device->device(), &sampler_ci, NULL, &sampler);
     ASSERT_VK_SUCCESS(err);
 
-    VkDescriptorImageInfo info = {};
-    info.sampler = sampler;
-
-    VkWriteDescriptorSet descriptor_write;
-    memset(&descriptor_write, 0, sizeof(descriptor_write));
-    descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptor_write.dstSet = ds.set_;
-    descriptor_write.dstBinding = 0;
-    descriptor_write.descriptorCount = 1;  // Lie here to avoid parameter_validation error
+    // descriptor_write.descriptorCount = 1, Lie here to avoid parameter_validation error
     // This is the wrong type, but empty binding error will be flagged first
-    descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-    descriptor_write.pImageInfo = &info;
+    descriptor_set.WriteDescriptorImageInfo(0, VK_NULL_HANDLE, sampler, VK_DESCRIPTOR_TYPE_SAMPLER);
 
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkWriteDescriptorSet-dstBinding-00316");
-    vkUpdateDescriptorSets(m_device->device(), 1, &descriptor_write, 0, NULL);
+    descriptor_set.UpdateDescriptorSets();
     m_errorMonitor->VerifyFound();
 
     vkDestroySampler(m_device->device(), sampler, NULL);
@@ -4951,9 +4562,9 @@ TEST_F(VkLayerTest, InvalidDSUpdateStruct) {
 
     ASSERT_NO_FATAL_FAILURE(Init());
 
-    OneOffDescriptorSet ds(m_device, {
-                                         {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                     });
+    OneOffDescriptorSet descriptor_set(m_device, {
+                                                     {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                                 });
 
     VkSamplerCreateInfo sampler_ci = SafeSaneSamplerCreateInfo();
     VkSampler sampler;
@@ -4966,7 +4577,7 @@ TEST_F(VkLayerTest, InvalidDSUpdateStruct) {
     VkWriteDescriptorSet descriptor_write;
     memset(&descriptor_write, 0, sizeof(descriptor_write));
     descriptor_write.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO; /* Intentionally broken struct type */
-    descriptor_write.dstSet = ds.set_;
+    descriptor_write.dstSet = descriptor_set.set_;
     descriptor_write.descriptorCount = 1;
     // This is the wrong type, but out of bounds will be flagged first
     descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
@@ -4984,27 +4595,14 @@ TEST_F(VkLayerTest, SampleDescriptorUpdateError) {
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkWriteDescriptorSet-descriptorType-00325");
 
     ASSERT_NO_FATAL_FAILURE(Init());
-    OneOffDescriptorSet ds(m_device, {
-                                         {0, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                     });
+    OneOffDescriptorSet descriptor_set(m_device, {
+                                                     {0, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                                 });
 
     VkSampler sampler = CastToHandle<VkSampler, uintptr_t>(0xbaadbeef);  // Sampler with invalid handle
 
-    VkDescriptorImageInfo descriptor_info;
-    memset(&descriptor_info, 0, sizeof(VkDescriptorImageInfo));
-    descriptor_info.sampler = sampler;
-
-    VkWriteDescriptorSet descriptor_write;
-    memset(&descriptor_write, 0, sizeof(descriptor_write));
-    descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptor_write.dstSet = ds.set_;
-    descriptor_write.dstBinding = 0;
-    descriptor_write.descriptorCount = 1;
-    descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-    descriptor_write.pImageInfo = &descriptor_info;
-
-    vkUpdateDescriptorSets(m_device->device(), 1, &descriptor_write, 0, NULL);
-
+    descriptor_set.WriteDescriptorImageInfo(0, VK_NULL_HANDLE, sampler, VK_DESCRIPTOR_TYPE_SAMPLER);
+    descriptor_set.UpdateDescriptorSets();
     m_errorMonitor->VerifyFound();
 }
 
@@ -5016,9 +4614,10 @@ TEST_F(VkLayerTest, ImageViewDescriptorUpdateError) {
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkWriteDescriptorSet-descriptorType-00326");
 
     ASSERT_NO_FATAL_FAILURE(Init());
-    OneOffDescriptorSet ds(m_device, {
-                                         {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                     });
+    OneOffDescriptorSet descriptor_set(m_device,
+                                       {
+                                           {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                       });
 
     VkSamplerCreateInfo sampler_ci = SafeSaneSamplerCreateInfo();
     VkSampler sampler;
@@ -5027,22 +4626,8 @@ TEST_F(VkLayerTest, ImageViewDescriptorUpdateError) {
 
     VkImageView view = CastToHandle<VkImageView, uintptr_t>(0xbaadbeef);  // invalid imageView object
 
-    VkDescriptorImageInfo descriptor_info;
-    memset(&descriptor_info, 0, sizeof(VkDescriptorImageInfo));
-    descriptor_info.sampler = sampler;
-    descriptor_info.imageView = view;
-
-    VkWriteDescriptorSet descriptor_write;
-    memset(&descriptor_write, 0, sizeof(descriptor_write));
-    descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptor_write.dstSet = ds.set_;
-    descriptor_write.dstBinding = 0;
-    descriptor_write.descriptorCount = 1;
-    descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    descriptor_write.pImageInfo = &descriptor_info;
-
-    vkUpdateDescriptorSets(m_device->device(), 1, &descriptor_write, 0, NULL);
-
+    descriptor_set.WriteDescriptorImageInfo(0, view, sampler, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    descriptor_set.UpdateDescriptorSets();
     m_errorMonitor->VerifyFound();
 
     vkDestroySampler(m_device->device(), sampler, NULL);
@@ -5057,36 +4642,27 @@ TEST_F(VkLayerTest, CopyDescriptorUpdateErrors) {
                                          " binding #1 with type VK_DESCRIPTOR_TYPE_SAMPLER. Types do not match.");
 
     ASSERT_NO_FATAL_FAILURE(Init());
-    OneOffDescriptorSet ds(m_device, {
-                                         {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                         {1, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                     });
+    OneOffDescriptorSet descriptor_set(m_device, {
+                                                     {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                                     {1, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                                 });
 
     VkSamplerCreateInfo sampler_ci = SafeSaneSamplerCreateInfo();
     VkSampler sampler;
     err = vkCreateSampler(m_device->device(), &sampler_ci, NULL, &sampler);
     ASSERT_VK_SUCCESS(err);
 
-    VkDescriptorImageInfo info = {};
-    info.sampler = sampler;
-
-    VkWriteDescriptorSet descriptor_write;
-    memset(&descriptor_write, 0, sizeof(VkWriteDescriptorSet));
-    descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptor_write.dstSet = ds.set_;
-    descriptor_write.dstBinding = 1;  // SAMPLER binding from layout above
-    descriptor_write.descriptorCount = 1;
-    descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-    descriptor_write.pImageInfo = &info;
+    // SAMPLER binding from layout above
     // This write update should succeed
-    vkUpdateDescriptorSets(m_device->device(), 1, &descriptor_write, 0, NULL);
+    descriptor_set.WriteDescriptorImageInfo(1, VK_NULL_HANDLE, sampler, VK_DESCRIPTOR_TYPE_SAMPLER);
+    descriptor_set.UpdateDescriptorSets();
     // Now perform a copy update that fails due to type mismatch
     VkCopyDescriptorSet copy_ds_update;
     memset(&copy_ds_update, 0, sizeof(VkCopyDescriptorSet));
     copy_ds_update.sType = VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET;
-    copy_ds_update.srcSet = ds.set_;
+    copy_ds_update.srcSet = descriptor_set.set_;
     copy_ds_update.srcBinding = 1;  // Copy from SAMPLER binding
-    copy_ds_update.dstSet = ds.set_;
+    copy_ds_update.dstSet = descriptor_set.set_;
     copy_ds_update.dstBinding = 0;       // ERROR : copy to UNIFORM binding
     copy_ds_update.descriptorCount = 1;  // copy 1 descriptor
     vkUpdateDescriptorSets(m_device->device(), 0, NULL, 1, &copy_ds_update);
@@ -5096,9 +4672,9 @@ TEST_F(VkLayerTest, CopyDescriptorUpdateErrors) {
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, " does not have copy update src binding of 3.");
     memset(&copy_ds_update, 0, sizeof(VkCopyDescriptorSet));
     copy_ds_update.sType = VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET;
-    copy_ds_update.srcSet = ds.set_;
+    copy_ds_update.srcSet = descriptor_set.set_;
     copy_ds_update.srcBinding = 3;  // ERROR : Invalid binding for matching layout
-    copy_ds_update.dstSet = ds.set_;
+    copy_ds_update.dstSet = descriptor_set.set_;
     copy_ds_update.dstBinding = 0;
     copy_ds_update.descriptorCount = 1;  // Copy 1 descriptor
     vkUpdateDescriptorSets(m_device->device(), 0, NULL, 1, &copy_ds_update);
@@ -5112,9 +4688,9 @@ TEST_F(VkLayerTest, CopyDescriptorUpdateErrors) {
 
     memset(&copy_ds_update, 0, sizeof(VkCopyDescriptorSet));
     copy_ds_update.sType = VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET;
-    copy_ds_update.srcSet = ds.set_;
+    copy_ds_update.srcSet = descriptor_set.set_;
     copy_ds_update.srcBinding = 1;
-    copy_ds_update.dstSet = ds.set_;
+    copy_ds_update.dstSet = descriptor_set.set_;
     copy_ds_update.dstBinding = 0;
     copy_ds_update.descriptorCount = 5;  // ERROR copy 5 descriptors (out of bounds for layout)
     vkUpdateDescriptorSets(m_device->device(), 0, NULL, 1, &copy_ds_update);
@@ -5132,11 +4708,11 @@ TEST_F(VkLayerTest, DrawWithPipelineIncompatibleWithRenderPass) {
     ASSERT_NO_FATAL_FAILURE(Init());
     ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
 
-    OneOffDescriptorSet ds(m_device, {
-                                         {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                     });
+    OneOffDescriptorSet descriptor_set(m_device, {
+                                                     {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                                 });
 
-    const VkPipelineLayoutObj pipeline_layout(m_device, {&ds.layout_});
+    const VkPipelineLayoutObj pipeline_layout(m_device, {&descriptor_set.layout_});
 
     VkShaderObj vs(m_device, bindStateVertShaderText, VK_SHADER_STAGE_VERTEX_BIT, this);
     VkShaderObj fs(m_device, bindStateFragShaderText, VK_SHADER_STAGE_FRAGMENT_BIT, this);  // We shouldn't need a fragment shader
@@ -5211,9 +4787,10 @@ TEST_F(VkLayerTest, Maint1BindingSliceOf3DImage) {
 
     VkResult err;
 
-    OneOffDescriptorSet set(m_device, {
-                                          {0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
-                                      });
+    OneOffDescriptorSet descriptor_set(m_device,
+                                       {
+                                           {0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
+                                       });
 
     VkImageCreateInfo ici = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
                              nullptr,
@@ -5253,8 +4830,16 @@ TEST_F(VkLayerTest, Maint1BindingSliceOf3DImage) {
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkDescriptorImageInfo-imageView-00343");
 
     VkDescriptorImageInfo dii = {VK_NULL_HANDLE, view, VK_IMAGE_LAYOUT_GENERAL};
-    VkWriteDescriptorSet write = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, set.set_, 0,      0, 1,
-                                  VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,       &dii,    nullptr,  nullptr};
+    VkWriteDescriptorSet write = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                  nullptr,
+                                  descriptor_set.set_,
+                                  0,
+                                  0,
+                                  1,
+                                  VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                                  &dii,
+                                  nullptr,
+                                  nullptr};
     vkUpdateDescriptorSets(m_device->device(), 1, &write, 0, nullptr);
 
     m_errorMonitor->VerifyFound();
@@ -5422,8 +5007,7 @@ TEST_F(VkLayerTest, FramebufferIncompatible) {
     vkBeginCommandBuffer(m_commandBuffer->handle(), &cbbi2);
     vkCmdBeginRenderPass(m_commandBuffer->handle(), &m_renderPassBeginInfo, VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
 
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
-                                         " that is not the same as the primary command buffer's current active framebuffer ");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkCmdExecuteCommands-pCommandBuffers-00099");
     vkCmdExecuteCommands(m_commandBuffer->handle(), 1, &sec_cb);
     m_errorMonitor->VerifyFound();
     // Cleanup
@@ -5728,7 +5312,7 @@ TEST_F(VkLayerTest, DescriptorIndexingSetLayout) {
 
     if (!(CheckDescriptorIndexingSupportAndInitFramework(this, m_instance_extension_names, m_device_extension_names, NULL,
                                                          m_errorMonitor))) {
-        printf("Descriptor indexing or one of its dependencies not supported, skipping tests\n");
+        printf("%s Descriptor indexing or one of its dependencies not supported, skipping tests\n.", kSkipPrefix);
         return;
     }
 
@@ -5934,13 +5518,13 @@ TEST_F(VkLayerTest, DescriptorIndexingUpdateAfterBind) {
     buffCI.size = 1024;
     buffCI.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
-    VkBuffer dyub;
-    err = vkCreateBuffer(m_device->device(), &buffCI, NULL, &dyub);
+    VkBuffer dynamic_uniform_buffer;
+    err = vkCreateBuffer(m_device->device(), &buffCI, NULL, &dynamic_uniform_buffer);
     ASSERT_VK_SUCCESS(err);
 
     VkDeviceMemory mem;
     VkMemoryRequirements mem_reqs;
-    vkGetBufferMemoryRequirements(m_device->device(), dyub, &mem_reqs);
+    vkGetBufferMemoryRequirements(m_device->device(), dynamic_uniform_buffer, &mem_reqs);
 
     VkMemoryAllocateInfo mem_alloc_info = {};
     mem_alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
@@ -5949,11 +5533,11 @@ TEST_F(VkLayerTest, DescriptorIndexingUpdateAfterBind) {
     err = vkAllocateMemory(m_device->device(), &mem_alloc_info, NULL, &mem);
     ASSERT_VK_SUCCESS(err);
 
-    err = vkBindBufferMemory(m_device->device(), dyub, mem, 0);
+    err = vkBindBufferMemory(m_device->device(), dynamic_uniform_buffer, mem, 0);
     ASSERT_VK_SUCCESS(err);
 
     VkDescriptorBufferInfo buffInfo[2] = {};
-    buffInfo[0].buffer = dyub;
+    buffInfo[0].buffer = dynamic_uniform_buffer;
     buffInfo[0].offset = 0;
     buffInfo[0].range = 1024;
 
@@ -5977,11 +5561,6 @@ TEST_F(VkLayerTest, DescriptorIndexingUpdateAfterBind) {
     vkCreatePipelineLayout(m_device->device(), &pipeline_layout_ci, NULL, &pipeline_layout);
 
     // Create a dummy pipeline, since VL inspects which bindings are actually used at draw time
-    char const *vsSource =
-        "#version 450\n"
-        "void main(){\n"
-        "   gl_Position = vec4(0);\n"
-        "}\n";
     char const *fsSource =
         "#version 450\n"
         "\n"
@@ -5992,7 +5571,7 @@ TEST_F(VkLayerTest, DescriptorIndexingUpdateAfterBind) {
         "   color = vec4(bar0.x0 + bar1.x1);\n"
         "}\n";
 
-    VkShaderObj vs(m_device, vsSource, VK_SHADER_STAGE_VERTEX_BIT, this);
+    VkShaderObj vs(m_device, bindStateVertShaderText, VK_SHADER_STAGE_VERTEX_BIT, this);
     VkShaderObj fs(m_device, fsSource, VK_SHADER_STAGE_FRAGMENT_BIT, this);
 
     VkPipelineObj pipe(m_device);
@@ -6035,7 +5614,8 @@ TEST_F(VkLayerTest, DescriptorIndexingUpdateAfterBind) {
             vkUpdateDescriptorSets(m_device->device(), 1, &descriptor_write[0], 0, NULL);
             m_errorMonitor->VerifyNotFound();
 
-            m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "is invalid because bound DescriptorSet");
+            m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
+                                                 "UNASSIGNED-CoreValidation-DrawState-InvalidCommandBuffer-VkDescriptorSet");
 
             vkEndCommandBuffer(m_commandBuffer->handle());
             m_errorMonitor->VerifyFound();
@@ -6044,7 +5624,7 @@ TEST_F(VkLayerTest, DescriptorIndexingUpdateAfterBind) {
 
     vkDestroyDescriptorSetLayout(m_device->handle(), ds_layout, nullptr);
     vkDestroyDescriptorPool(m_device->handle(), pool, nullptr);
-    vkDestroyBuffer(m_device->handle(), dyub, NULL);
+    vkDestroyBuffer(m_device->handle(), dynamic_uniform_buffer, NULL);
     vkFreeMemory(m_device->handle(), mem, NULL);
     vkDestroyPipelineLayout(m_device->handle(), pipeline_layout, NULL);
 }
