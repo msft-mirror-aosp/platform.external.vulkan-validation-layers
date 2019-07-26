@@ -122,6 +122,14 @@ VkPhysicalDevicePushDescriptorPropertiesKHR GetPushDescriptorProperties(VkInstan
     return push_descriptor_prop;
 }
 
+VkPhysicalDeviceSubgroupProperties GetSubgroupProperties(VkInstance instance, VkPhysicalDevice gpu) {
+    auto subgroup_prop = lvl_init_struct<VkPhysicalDeviceSubgroupProperties>();
+
+    auto prop2 = lvl_init_struct<VkPhysicalDeviceProperties2>(&subgroup_prop);
+    vkGetPhysicalDeviceProperties2(gpu, &prop2);
+    return subgroup_prop;
+}
+
 bool operator==(const VkDebugUtilsLabelEXT &rhs, const VkDebugUtilsLabelEXT &lhs) {
     bool is_equal = (rhs.color[0] == lhs.color[0]) && (rhs.color[1] == lhs.color[1]) && (rhs.color[2] == lhs.color[2]) &&
                     (rhs.color[3] == lhs.color[3]);
@@ -192,6 +200,19 @@ void TestRenderPassCreate(ErrorMonitor *error_monitor, const VkDevice device, co
         if (err == VK_SUCCESS) vkDestroyRenderPass(device, render_pass, nullptr);
         error_monitor->VerifyFound();
     }
+}
+
+void TestRenderPass2KHRCreate(ErrorMonitor *error_monitor, const VkDevice device, const VkRenderPassCreateInfo2KHR *create_info,
+                              const char *rp2_vuid) {
+    VkRenderPass render_pass = VK_NULL_HANDLE;
+    VkResult err;
+    PFN_vkCreateRenderPass2KHR vkCreateRenderPass2KHR =
+        (PFN_vkCreateRenderPass2KHR)vkGetDeviceProcAddr(device, "vkCreateRenderPass2KHR");
+
+    error_monitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, rp2_vuid);
+    err = vkCreateRenderPass2KHR(device, create_info, nullptr, &render_pass);
+    if (err == VK_SUCCESS) vkDestroyRenderPass(device, render_pass, nullptr);
+    error_monitor->VerifyFound();
 }
 
 void TestRenderPassBegin(ErrorMonitor *error_monitor, const VkDevice device, const VkCommandBuffer command_buffer,
@@ -399,7 +420,7 @@ void CreateSamplerTest(VkLayerTest &test, const VkSamplerCreateInfo *pCreateInfo
     VkResult err;
     VkSampler sampler = VK_NULL_HANDLE;
     if (code.length())
-        test.Monitor()->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, code);
+        test.Monitor()->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT, code);
     else
         test.Monitor()->ExpectSuccess();
 
@@ -869,7 +890,7 @@ void VkLayerTest::VKTriangleTest(BsoFailSelect failCase) {
         VkClearAttachment color_attachment = {};
         color_attachment.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         color_attachment.colorAttachment = 2000000000;  // Someone who knew what they were doing would use 0 for the index;
-        VkClearRect clear_rect = {{{0, 0}, {static_cast<uint32_t>(m_width), static_cast<uint32_t>(m_height)}}, 0, 0};
+        VkClearRect clear_rect = {{{0, 0}, {static_cast<uint32_t>(m_width), static_cast<uint32_t>(m_height)}}, 0, 1};
 
         vkCmdClearAttachments(m_commandBuffer->handle(), 1, &color_attachment, 1, &clear_rect);
     }
@@ -932,7 +953,9 @@ ErrorMonitor *VkLayerTest::Monitor() { return m_errorMonitor; }
 
 VkCommandBufferObj *VkLayerTest::CommandBuffer() { return m_commandBuffer; }
 
-void VkLayerTest::SetUp() {
+VkLayerTest::VkLayerTest() {
+    m_enableWSI = false;
+
     m_instance_layer_names.clear();
     m_instance_extension_names.clear();
     m_device_extension_names.clear();
@@ -957,26 +980,6 @@ void VkLayerTest::SetUp() {
             printf("             Did not find VK_LAYER_LUNARG_device_simulation layer so it will not be enabled.\n");
         }
     }
-    if (m_enableWSI) {
-        m_instance_extension_names.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
-        m_device_extension_names.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
-#ifdef NEED_TO_TEST_THIS_ON_PLATFORM
-#if defined(VK_USE_PLATFORM_ANDROID_KHR)
-        m_instance_extension_names.push_back(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
-#endif  // VK_USE_PLATFORM_ANDROID_KHR
-#if defined(VK_USE_PLATFORM_WAYLAND_KHR)
-        m_instance_extension_names.push_back(VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
-#endif  // VK_USE_PLATFORM_WAYLAND_KHR
-#if defined(VK_USE_PLATFORM_WIN32_KHR)
-        m_instance_extension_names.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
-#endif  // VK_USE_PLATFORM_WIN32_KHR
-#endif  // NEED_TO_TEST_THIS_ON_PLATFORM
-#if defined(VK_USE_PLATFORM_XCB_KHR)
-        m_instance_extension_names.push_back(VK_KHR_XCB_SURFACE_EXTENSION_NAME);
-#elif defined(VK_USE_PLATFORM_XLIB_KHR)
-        m_instance_extension_names.push_back(VK_KHR_XLIB_SURFACE_EXTENSION_NAME);
-#endif  // VK_USE_PLATFORM_XLIB_KHR
-    }
 
     this->app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     this->app_info.pNext = NULL;
@@ -996,6 +999,69 @@ void VkLayerTest::SetUp() {
         m_instance_api_version = VK_API_VERSION_1_0;
     }
     m_target_api_version = app_info.apiVersion;
+}
+
+bool VkLayerTest::AddSurfaceInstanceExtension() {
+    m_enableWSI = true;
+    if (!InstanceExtensionSupported(VK_KHR_SURFACE_EXTENSION_NAME)) {
+        printf("%s VK_KHR_SURFACE_EXTENSION_NAME extension not supported\n", kSkipPrefix);
+        return false;
+    }
+    m_instance_extension_names.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+
+    bool bSupport = false;
+#if defined(VK_USE_PLATFORM_WIN32_KHR)
+    if (!InstanceExtensionSupported(VK_KHR_WIN32_SURFACE_EXTENSION_NAME)) {
+        printf("%s VK_KHR_WIN32_SURFACE_EXTENSION_NAME extension not supported\n", kSkipPrefix);
+        return false;
+    }
+    m_instance_extension_names.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
+    bSupport = true;
+#endif
+
+#if defined(VK_USE_PLATFORM_ANDROID_KHR) && defined(VALIDATION_APK)
+    if (!InstanceExtensionSupported(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME)) {
+        printf("%s VK_KHR_ANDROID_SURFACE_EXTENSION_NAME extension not supported\n", kSkipPrefix);
+        return false;
+    }
+    m_instance_extension_names.push_back(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
+    bSupport = true;
+#endif
+
+#if defined(VK_USE_PLATFORM_XLIB_KHR)
+    if (!InstanceExtensionSupported(VK_KHR_XLIB_SURFACE_EXTENSION_NAME)) {
+        printf("%s VK_KHR_XLIB_SURFACE_EXTENSION_NAME extension not supported\n", kSkipPrefix);
+        return false;
+    }
+    if (XOpenDisplay(NULL)) {
+        m_instance_extension_names.push_back(VK_KHR_XLIB_SURFACE_EXTENSION_NAME);
+        bSupport = true;
+    }
+#endif
+
+#if defined(VK_USE_PLATFORM_XCB_KHR)
+    if (!InstanceExtensionSupported(VK_KHR_XCB_SURFACE_EXTENSION_NAME)) {
+        printf("%s VK_KHR_XCB_SURFACE_EXTENSION_NAME extension not supported\n", kSkipPrefix);
+        return false;
+    }
+    if (!bSupport && xcb_connect(NULL, NULL)) {
+        m_instance_extension_names.push_back(VK_KHR_XCB_SURFACE_EXTENSION_NAME);
+        bSupport = true;
+    }
+#endif
+
+    if (bSupport) return true;
+    printf("%s No platform's surface extension supported\n", kSkipPrefix);
+    return false;
+}
+
+bool VkLayerTest::AddSwapchainDeviceExtension() {
+    if (!DeviceExtensionSupported(gpu(), nullptr, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) {
+        printf("%s VK_KHR_SWAPCHAIN_EXTENSION_NAME extension not supported\n", kSkipPrefix);
+        return false;
+    }
+    m_device_extension_names.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+    return true;
 }
 
 uint32_t VkLayerTest::SetTargetApiVersion(uint32_t target_api_version) {
@@ -1030,13 +1096,10 @@ bool VkLayerTest::LoadDeviceProfileLayer(
     return 1;
 }
 
-void VkLayerTest::TearDown() {
+VkLayerTest::~VkLayerTest() {
     // Clean up resources before we reset
-    ShutdownFramework();
     delete m_errorMonitor;
 }
-
-VkLayerTest::VkLayerTest() { m_enableWSI = false; }
 
 bool VkBufferTest::GetTestConditionValid(VkDeviceObj *aVulkanDevice, eTestEnFlags aTestFlag, VkBufferUsageFlags aBufferUsage) {
     if (eInvalidDeviceOffset != aTestFlag && eInvalidMemoryOffset != aTestFlag) {
@@ -1248,7 +1311,8 @@ OneOffDescriptorSet::~OneOffDescriptorSet() {
 
 bool OneOffDescriptorSet::Initialized() { return pool_ != VK_NULL_HANDLE && layout_.initialized() && set_ != VK_NULL_HANDLE; }
 
-void OneOffDescriptorSet::WriteDescriptorBuffer(int blinding, VkBuffer buffer, VkDeviceSize size, VkDescriptorType descriptorType) {
+void OneOffDescriptorSet::WriteDescriptorBufferInfo(int blinding, VkBuffer buffer, VkDeviceSize size,
+                                                    VkDescriptorType descriptorType) {
     VkDescriptorBufferInfo buffer_info = {};
     buffer_info.buffer = buffer;
     buffer_info.offset = 0;
@@ -1285,7 +1349,7 @@ void OneOffDescriptorSet::WriteDescriptorBufferView(int blinding, VkBufferView &
     descriptor_writes.emplace_back(descriptor_write);
 }
 
-void OneOffDescriptorSet::WriteDescriptorImageView(int blinding, VkImageView image_view, VkSampler sampler,
+void OneOffDescriptorSet::WriteDescriptorImageInfo(int blinding, VkImageView image_view, VkSampler sampler,
                                                    VkDescriptorType descriptorType) {
     VkDescriptorImageInfo image_info = {};
     image_info.imageView = image_view;
@@ -1871,6 +1935,12 @@ void BarrierQueueFamilyTestHelper::operator()(std::string img_err, std::string b
     }
     context_->Reset();
 };
+
+void print_android(const char *c) {
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
+    __android_log_print(ANDROID_LOG_INFO, "VulkanLayerValidationTests", "%s", c);
+#endif  // VK_USE_PLATFORM_ANDROID_KHR
+}
 
 #if defined(ANDROID) && defined(VALIDATION_APK)
 const char *appTag = "VulkanLayerValidationTests";

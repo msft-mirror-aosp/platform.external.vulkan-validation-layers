@@ -21,14 +21,16 @@
 # Author: Shannon McPherson <shannon@lunarg.com>
 
 import argparse
-import os
-import sys
-import operator
-import platform
-import json
-import re
+import common_codegen
 import csv
+import glob
 import html
+import json
+import operator
+import os
+import platform
+import re
+import sys
 import time
 from collections import defaultdict
 
@@ -39,8 +41,7 @@ html_db = False
 txt_filename = "validation_error_database.txt"
 csv_filename = "validation_error_database.csv"
 html_filename = "validation_error_database.html"
-header_filename = "../layers/vk_validation_error_messages.h"
-test_file = '../tests/layer_validation_tests.cpp'
+header_filename = "vk_validation_error_messages.h"
 vuid_prefixes = ['VUID-', 'UNASSIGNED-']
 
 # Hard-coded flags that could be command line args, if we decide that's useful
@@ -48,26 +49,20 @@ vuid_prefixes = ['VUID-', 'UNASSIGNED-']
 dealias_khr = True
 ignore_unassigned = True # These are not found in layer code unless they appear explicitly (most don't), so produce false positives
 
-generated_layer_source_directories = [
-'build',
-'dbuild',
-'release',
-'../build/Vulkan-ValidationLayers/'
-]
-generated_layer_source_files = [
-'parameter_validation.cpp',
-'object_tracker.cpp',
-]
-layer_source_files = [
-'../layers/buffer_validation.cpp',
-'../layers/core_validation.cpp',
-'../layers/descriptor_sets.cpp',
-'../layers/drawdispatch.cpp',
-'../layers/parameter_validation_utils.cpp',
-'../layers/object_tracker_utils.cpp',
-'../layers/shader_validation.cpp',
-'../layers/stateless_validation.h'
-]
+layer_source_files = [common_codegen.repo_relative(path) for path in [
+    'layers/buffer_validation.cpp',
+    'layers/core_validation.cpp',
+    'layers/descriptor_sets.cpp',
+    'layers/drawdispatch.cpp',
+    'layers/parameter_validation_utils.cpp',
+    'layers/object_tracker_utils.cpp',
+    'layers/shader_validation.cpp',
+    'layers/stateless_validation.h',
+    'layers/generated/parameter_validation.cpp',
+    'layers/generated/object_tracker.cpp',
+]]
+
+test_source_files = glob.glob(os.path.join(common_codegen.repo_relative('tests'), '*.cpp'))
 
 # This needs to be updated as new extensions roll in
 khr_aliases = {
@@ -237,32 +232,14 @@ class ValidationJSON:
 
 
 class ValidationSource:
-    def __init__(self, source_file_list, generated_source_file_list, generated_source_directories):
+    def __init__(self, source_file_list):
         self.source_files = source_file_list
-        self.generated_source_files = generated_source_file_list
-        self.generated_source_dirs = generated_source_directories
         self.vuid_count_dict = {} # dict of vuid values to the count of how much they're used, and location of where they're used
         self.duplicated_checks = 0
         self.explicit_vuids = set()
         self.implicit_vuids = set()
         self.unassigned_vuids = set()
         self.all_vuids = set()
-
-        if len(self.generated_source_files) > 0:
-            qualified_paths = []
-            for source in self.generated_source_files:
-                for build_dir in self.generated_source_dirs:
-                    filepath = '../%s/layers/%s' % (build_dir, source)
-                    if os.path.isfile(filepath):
-                        qualified_paths.append(filepath)
-                        break
-            if len(self.generated_source_files) != len(qualified_paths):
-                print("Error: Unable to locate one or more of the following source files in the %s directories" % (", ".join(generated_source_directories)))
-                print(self.generated_source_files)
-                print("Failed to locate one or more codegen files in layer source code - cannot proceed.")
-                exit(1)
-            else:
-                self.source_files.extend(qualified_paths)
 
     def parse(self):
         prepend = None
@@ -278,6 +255,8 @@ class ValidationSource:
                         line = prepend[:-2] + line.lstrip().lstrip('"') # join lines skipping CR, whitespace and trailing/leading quote char
                         prepend = None
                     if any(prefix in line for prefix in vuid_prefixes):
+                        # Replace the '(' of lines containing validation helper functions with ' ' to make them easier to parse
+                        line = line.replace("(", " ")
                         line_list = line.split()
 
                         # A VUID string that has been broken by clang will start with a vuid prefix and end with -, and will be last in the list
@@ -476,7 +455,6 @@ class OutputDatabase:
         self.vt = val_tests
         self.header_version = "/* THIS FILE IS GENERATED - DO NOT EDIT (scripts/vk_validation_stats.py) */"
         self.header_version += "\n/* Vulkan specification version: %s */" % val_json.apiversion
-        self.header_version += "\n/* Header generated: %s */\n" % time.strftime('%Y-%m-%d %H:%M:%S')
         self.header_preamble = """
 /*
  * Vulkan
@@ -620,7 +598,7 @@ static const vuid_spec_text_pair vuid_spec_text[] = {
             cmd_enum = ['    ' + cmd_prefix + 'NONE = 0']
 
             cmd_ordinal = 1
-            for vuid, db_text in cmd_dict.items():
+            for vuid, db_text in sorted(cmd_dict.items()):
                 cmd_match = cmd_regex.match(vuid)
                 if cmd_match.group(1) == "End":
                     end = "END"
@@ -722,7 +700,7 @@ def main(argv):
                     print("    with extension: %s" % ext['ext'])
 
     # Parse layer source files
-    val_source = ValidationSource(layer_source_files, generated_layer_source_files, generated_layer_source_directories)
+    val_source = ValidationSource(layer_source_files)
     val_source.parse()
     exp_checks = len(val_source.explicit_vuids)
     imp_checks = len(val_source.implicit_vuids)
@@ -735,13 +713,13 @@ def main(argv):
         print("  %d checks are implemented more that once" % val_source.duplicated_checks)
 
     # Parse test files
-    val_tests = ValidationTests([test_file, ])
+    val_tests = ValidationTests(test_source_files)
     val_tests.parse()
     exp_tests = len(val_tests.explicit_vuids)
     imp_tests = len(val_tests.implicit_vuids)
     all_tests = len(val_tests.all_vuids)
     if verbose_mode:
-        print("Found %d unique error vuids in test file %s." % (all_tests, test_file))
+        print("Found %d unique error vuids in test source code." % all_tests)
         print("  %d explicit" % exp_tests)
         print("  %d implicit" % imp_tests)
         print("  %d unassigned" % len(val_tests.unassigned_vuids))
