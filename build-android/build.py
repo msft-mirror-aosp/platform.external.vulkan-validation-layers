@@ -270,14 +270,6 @@ def main():
   print('Constructing Vulkan validation layer source...')
 
   build_cmd = [
-    'bash', build_dir + '/vulkan/src/build-android/android-generate.sh',
-            build_dir + '/vulkan/src/registry'
-  ]
-  print('Generating generated layers...')
-  subprocess.check_call(build_cmd)
-  print('Generation finished')
-
-  build_cmd = [
     'bash', ndk_build, '-C', build_dir + '/vulkan/src/build-android',
     jobs_arg(),
     'APP_ABI=' + ' '.join(abis),
