@@ -15,8 +15,6 @@
 # limitations under the License.
 # ~~~
 
-set(GTEST_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/../external/googletest)
-
 # Needed to make structure definitions match with glslang libraries
 add_definitions(-DNV_EXTENSIONS -DAMD_EXTENSIONS)
 
@@ -108,17 +106,18 @@ add_executable(vk_layer_validation_tests
                layer_validation_tests.cpp
                ../layers/vk_format_utils.cpp
                ../layers/convert_to_renderpass2.cpp
-               ${PROJECT_BINARY_DIR}/vk_safe_struct.cpp
+               ../layers/generated/vk_safe_struct.cpp
                ${COMMON_CPP})
 add_test(NAME vk_layer_validation_tests COMMAND vk_layer_validation_tests)
-add_dependencies(vk_layer_validation_tests Vulkan::Vulkan)
+add_dependencies(vk_layer_validation_tests Vulkan::Vulkan VkLayer_khronos_validation VkLayer_khronos_validation-json)
 if(NOT GTEST_IS_STATIC_LIB)
     set_target_properties(vk_layer_validation_tests PROPERTIES COMPILE_DEFINITIONS "GTEST_LINKED_AS_SHARED_LIBRARY=1")
 endif()
+# Note that there is no need to add GTEST directories here due to googletest exporting them via the gtest target.
 target_include_directories(vk_layer_validation_tests
                            PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
-                                  ${GTEST_LOCATION}/googletest/include
                                   ${PROJECT_SOURCE_DIR}/layers
+                                  ${PROJECT_SOURCE_DIR}/layers/generated
                                   ${GLSLANG_SPIRV_INCLUDE_DIR}
                                   ${SPIRV_TOOLS_INCLUDE_DIR}
                                   ${CMAKE_CURRENT_BINARY_DIR}
