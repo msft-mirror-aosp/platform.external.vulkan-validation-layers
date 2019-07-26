@@ -8866,7 +8866,7 @@ void CoreChecks::PostCallRecordCmdResetQueryPool(VkCommandBuffer commandBuffer, 
 QueryState CoreChecks::GetQueryState(QUEUE_STATE *queue_data, VkQueryPool queryPool, uint32_t queryIndex) {
     QueryObject query = {queryPool, queryIndex};
 
-    const std::array<decltype(queryToStateMap) *, 2> map_list = {&queue_data->queryToStateMap, &queryToStateMap};
+    const std::array<decltype(queryToStateMap) *, 2> map_list = {{&queue_data->queryToStateMap, &queryToStateMap}};
 
     for (const auto map : map_list) {
         auto query_data = map->find(query);
