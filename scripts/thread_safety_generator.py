@@ -681,22 +681,6 @@ void ThreadSafety::PostCallRecordGetSwapchainImagesKHR(VkDevice device, VkSwapch
                 ispointer = True
         return ispointer
 
-    # Check if an object is a non-dispatchable handle
-    def isHandleTypeNonDispatchable(self, handletype):
-        handle = self.registry.tree.find("types/type/[name='" + handletype + "'][@category='handle']")
-        if handle is not None and handle.find('type').text == 'VK_DEFINE_NON_DISPATCHABLE_HANDLE':
-            return True
-        else:
-            return False
-
-    # Check if an object is a dispatchable handle
-    def isHandleTypeDispatchable(self, handletype):
-        handle = self.registry.tree.find("types/type/[name='" + handletype + "'][@category='handle']")
-        if handle is not None and handle.find('type').text == 'VK_DEFINE_HANDLE':
-            return True
-        else:
-            return False
-
     def makeThreadUseBlock(self, cmd, functionprefix):
         """Generate C function pointer typedef for <command> Element"""
         paramdecl = ''
@@ -759,7 +743,7 @@ void ThreadSafety::PostCallRecordGetSwapchainImagesKHR(VkDevice device, VkSwapch
                         paramtype = paramtype.text
                     else:
                         paramtype = 'None'
-                    if (self.isHandleTypeDispatchable(paramtype) or self.isHandleTypeNonDispatchable(paramtype)) and paramtype != 'VkPhysicalDevice':
+                    if paramtype in self.handle_types and paramtype != 'VkPhysicalDevice':
                         if self.paramIsArray(param) and ('pPipelines' != paramname.text):
                             # Add pointer dereference for array counts that are pointer values
                             dereference = ''
@@ -808,7 +792,10 @@ void ThreadSafety::PostCallRecordGetSwapchainImagesKHR(VkDevice device, VkSwapch
             return paramdecl
     def beginFile(self, genOpts):
         OutputGenerator.beginFile(self, genOpts)
-        #
+        
+        # Initialize members that require the tree
+        self.handle_types = GetHandleTypes(self.registry.tree)
+
         # TODO: LUGMAL -- remove this and add our copyright
         # User-supplied prefix text, if any (list of strings)
         write(self.inline_copyright_message, file=self.outFile)
@@ -834,7 +821,7 @@ void ThreadSafety::PostCallRecordGetSwapchainImagesKHR(VkDevice device, VkSwapch
         counter_class_instances = ''
         counter_class_bodies = ''
 
-        for obj in self.non_dispatchable_types:
+        for obj in sorted(self.non_dispatchable_types):
             counter_class_defs += '    counter<%s> c_%s;\n' % (obj, obj)
             if obj in self.object_to_debug_report_type:
                 obj_type = self.object_to_debug_report_type[obj]
@@ -882,11 +869,8 @@ void ThreadSafety::PostCallRecordGetSwapchainImagesKHR(VkDevice device, VkSwapch
     # Type generation
     def genType(self, typeinfo, name, alias):
         OutputGenerator.genType(self, typeinfo, name, alias)
-        type_elem = typeinfo.elem
-        category = type_elem.get('category')
-        if category == 'handle':
-            if self.isHandleTypeNonDispatchable(name):
-                self.non_dispatchable_types.add(name)
+        if self.handle_types.IsNonDispatchable(name):
+            self.non_dispatchable_types.add(name)
     #
     # Struct (e.g. C "struct" type) generation.
     # This is a special case of the <type> tag where the contents are

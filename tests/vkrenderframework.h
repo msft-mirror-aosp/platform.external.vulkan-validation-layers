@@ -77,9 +77,6 @@ class VkDepthStencilObj;
 
 class VkRenderFramework : public VkTestFramework {
    public:
-    VkRenderFramework();
-    ~VkRenderFramework();
-
     VkInstance instance() { return inst; }
     VkDevice device() { return m_device->device(); }
     VkDeviceObj *DeviceObj() const { return m_device; }
@@ -89,8 +86,12 @@ class VkRenderFramework : public VkTestFramework {
     VkFramebuffer framebuffer() { return m_framebuffer; }
     void InitViewport(float width, float height);
     void InitViewport();
-    void InitSwapchain(float width, float height);
-    void InitSwapchain();
+    bool InitSurface();
+    bool InitSurface(float width, float height);
+    bool InitSwapchain(VkSurfaceKHR &surface, VkImageUsageFlags imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+                       VkSurfaceTransformFlagBitsKHR preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR);
+    bool InitSwapchain(VkImageUsageFlags imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+                       VkSurfaceTransformFlagBitsKHR preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR);
     void DestroySwapchain();
     void InitRenderTarget();
     void InitRenderTarget(uint32_t targets);
@@ -118,6 +119,9 @@ class VkRenderFramework : public VkTestFramework {
     bool DeviceCanDraw();
 
    protected:
+    VkRenderFramework();
+    virtual ~VkRenderFramework() = 0;
+
     VkApplicationInfo app_info;
     VkInstance inst;
     VkPhysicalDevice objs[16];
@@ -163,24 +167,6 @@ class VkRenderFramework : public VkTestFramework {
     std::vector<const char *> m_instance_layer_names;
     std::vector<const char *> m_instance_extension_names;
     std::vector<const char *> m_device_extension_names;
-
-    /*
-     * SetUp and TearDown are called by the Google Test framework
-     * to initialize a test framework based on this class.
-     */
-    virtual void SetUp() {
-        this->app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-        this->app_info.pNext = NULL;
-        this->app_info.pApplicationName = "base";
-        this->app_info.applicationVersion = 1;
-        this->app_info.pEngineName = "unittest";
-        this->app_info.engineVersion = 1;
-        this->app_info.apiVersion = VK_API_VERSION_1_0;
-
-        InitFramework();
-    }
-
-    virtual void TearDown() { ShutdownFramework(); }
 };
 
 class VkDescriptorSetObj;
@@ -189,6 +175,7 @@ class VkPipelineObj;
 class VkDescriptorSetObj;
 typedef vk_testing::Fence VkFenceObj;
 typedef vk_testing::Buffer VkBufferObj;
+typedef vk_testing::AccelerationStructure VkAccelerationStructureObj;
 
 class VkCommandPoolObj : public vk_testing::CommandPool {
    public:
@@ -412,9 +399,9 @@ class VkDescriptorSetObj : public vk_testing::DescriptorPool {
 class VkShaderObj : public vk_testing::ShaderModule {
    public:
     VkShaderObj(VkDeviceObj *device, const char *shaderText, VkShaderStageFlagBits stage, VkRenderFramework *framework,
-                char const *name = "main", bool debug = false);
+                char const *name = "main", bool debug = false, VkSpecializationInfo *specInfo = nullptr);
     VkShaderObj(VkDeviceObj *device, const std::string spv_source, VkShaderStageFlagBits stage, VkRenderFramework *framework,
-                char const *name = "main");
+                char const *name = "main", VkSpecializationInfo *specInfo = nullptr);
     VkPipelineShaderStageCreateInfo const &GetStageCreateInfo() const;
 
    protected:

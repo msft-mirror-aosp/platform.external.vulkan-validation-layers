@@ -505,7 +505,7 @@ TEST_F(VkLayerTest, InvalidMemoryAliasing) {
 
     vkGetImageMemoryRequirements(m_device->device(), image2, &img_mem_reqs2);
 
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_WARNING_BIT_EXT, " is aliased with linear buffer 0x");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_WARNING_BIT_EXT, "UNASSIGNED-CoreValidation-MemTrack-InvalidAliasing");
     // VALIDATION FAILURE due to image mapping overlapping buffer mapping
     err = vkBindImageMemory(m_device->device(), image, mem, 0);
     m_errorMonitor->VerifyFound();
@@ -518,7 +518,7 @@ TEST_F(VkLayerTest, InvalidMemoryAliasing) {
     ASSERT_VK_SUCCESS(err);
     err = vkBindImageMemory(m_device->device(), image2, mem_img, 0);
     ASSERT_VK_SUCCESS(err);
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_WARNING_BIT_EXT, "is aliased with non-linear image 0x");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_WARNING_BIT_EXT, "UNASSIGNED-CoreValidation-MemTrack-InvalidAliasing");
     vkGetBufferMemoryRequirements(m_device->device(), buffer2, &buff_mem_reqs2);
     err = vkBindBufferMemory(m_device->device(), buffer2, mem_img, 0);
     m_errorMonitor->VerifyFound();
@@ -581,8 +581,7 @@ TEST_F(VkLayerTest, InvalidMemoryMapping) {
     // Map memory twice
     err = vkMapMemory(m_device->device(), mem, 0, mem_reqs.size, 0, (void **)&pData);
     ASSERT_VK_SUCCESS(err);
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
-                                         "VkMapMemory: Attempting to map memory on an already-mapped object ");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "UNASSIGNED-CoreValidation-MemTrack-InvalidMap");
     err = vkMapMemory(m_device->device(), mem, 0, mem_reqs.size, 0, (void **)&pData);
     m_errorMonitor->VerifyFound();
 
@@ -706,7 +705,7 @@ TEST_F(VkLayerTest, RebindMemory) {
     VkResult err;
     bool pass;
 
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "which has already been bound to mem object");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkBindImageMemory-image-01044");
 
     ASSERT_NO_FATAL_FAILURE(Init());
 
@@ -838,7 +837,7 @@ TEST_F(VkLayerTest, InvalidUsageBits) {
     dsvci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
 
     // Create a view with depth / stencil aspect for image with different usage
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "Invalid usage flag for Image ");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "UNASSIGNED-CoreValidation-MemTrack-InvalidUsageFlag");
     vkCreateImageView(m_device->device(), &dsvci, NULL, &dsv);
     m_errorMonitor->VerifyFound();
 
@@ -865,6 +864,94 @@ TEST_F(VkLayerTest, InvalidUsageBits) {
     vkCmdCopyBufferToImage(m_commandBuffer->handle(), buffer.handle(), image.handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
                            &region);
     m_errorMonitor->VerifyFound();
+}
+
+TEST_F(VkLayerTest, CopyBufferToCompressedImage) {
+    TEST_DESCRIPTION("Copy buffer to compressed image when buffer is larger than image.");
+    ASSERT_NO_FATAL_FAILURE(Init());
+
+    // Verify format support
+    if (!ImageFormatAndFeaturesSupported(gpu(), VK_FORMAT_BC1_RGBA_SRGB_BLOCK, VK_IMAGE_TILING_OPTIMAL,
+                                         VK_FORMAT_FEATURE_TRANSFER_DST_BIT_KHR)) {
+        printf("%s Required formats/features not supported - CopyBufferToCompressedImage skipped.\n", kSkipPrefix);
+        return;
+    }
+
+    VkImageObj width_image(m_device);
+    VkImageObj height_image(m_device);
+    VkBufferObj buffer;
+    VkMemoryPropertyFlags reqs = 0;
+    buffer.init_as_src(*m_device, 8 * 4 * 2, reqs);
+    VkBufferImageCopy region = {};
+    region.bufferRowLength = 0;
+    region.bufferImageHeight = 0;
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.layerCount = 1;
+    region.imageExtent.width = 8;
+    region.imageExtent.height = 4;
+    region.imageExtent.depth = 1;
+
+    width_image.Init(5, 4, 1, VK_FORMAT_BC1_RGBA_SRGB_BLOCK, VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_IMAGE_TILING_OPTIMAL);
+    height_image.Init(8, 3, 1, VK_FORMAT_BC1_RGBA_SRGB_BLOCK, VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_IMAGE_TILING_OPTIMAL);
+    if (!width_image.initialized() || (!height_image.initialized())) {
+        printf("%s Unable to initialize surfaces - UncompressedToCompressedImageCopy skipped.\n", kSkipPrefix);
+        return;
+    }
+    m_commandBuffer->begin();
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkBufferImageCopy-imageOffset-00197");
+    vkCmdCopyBufferToImage(m_commandBuffer->handle(), buffer.handle(), width_image.handle(), VK_IMAGE_LAYOUT_GENERAL, 1, &region);
+    m_errorMonitor->VerifyFound();
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkBufferImageCopy-imageOffset-00200");
+    m_errorMonitor->SetUnexpectedError("VUID-vkCmdCopyBufferToImage-pRegions-00172");
+
+    VkResult err;
+    VkImageCreateInfo depth_image_create_info = {};
+    depth_image_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    depth_image_create_info.pNext = NULL;
+    depth_image_create_info.imageType = VK_IMAGE_TYPE_3D;
+    depth_image_create_info.format = VK_FORMAT_BC1_RGBA_SRGB_BLOCK;
+    depth_image_create_info.extent.width = 8;
+    depth_image_create_info.extent.height = 4;
+    depth_image_create_info.extent.depth = 1;
+    depth_image_create_info.mipLevels = 1;
+    depth_image_create_info.arrayLayers = 1;
+    depth_image_create_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    depth_image_create_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    depth_image_create_info.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
+    depth_image_create_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    depth_image_create_info.queueFamilyIndexCount = 0;
+    depth_image_create_info.pQueueFamilyIndices = NULL;
+
+    VkImage depth_image = VK_NULL_HANDLE;
+    err = vkCreateImage(m_device->handle(), &depth_image_create_info, NULL, &depth_image);
+    ASSERT_VK_SUCCESS(err);
+
+    VkDeviceMemory mem1;
+    VkMemoryRequirements mem_reqs;
+    mem_reqs.memoryTypeBits = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+    VkMemoryAllocateInfo mem_alloc = {};
+    mem_alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    mem_alloc.pNext = NULL;
+    mem_alloc.allocationSize = 0;
+    mem_alloc.memoryTypeIndex = 0;
+    mem_alloc.memoryTypeIndex = 1;
+    vkGetImageMemoryRequirements(m_device->device(), depth_image, &mem_reqs);
+    mem_alloc.allocationSize = mem_reqs.size;
+    bool pass = m_device->phy().set_memory_type(mem_reqs.memoryTypeBits, &mem_alloc, 0);
+    ASSERT_TRUE(pass);
+    err = vkAllocateMemory(m_device->device(), &mem_alloc, NULL, &mem1);
+    ASSERT_VK_SUCCESS(err);
+    err = vkBindImageMemory(m_device->device(), depth_image, mem1, 0);
+
+    region.imageExtent.depth = 2;
+    vkCmdCopyBufferToImage(m_commandBuffer->handle(), buffer.handle(), depth_image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
+    m_errorMonitor->VerifyFound();
+
+    vkDestroyImage(m_device->device(), depth_image, NULL);
+    vkFreeMemory(m_device->device(), mem1, NULL);
+    m_commandBuffer->end();
 }
 
 TEST_F(VkLayerTest, CreateUnknownObject) {
@@ -2659,7 +2746,8 @@ TEST_F(VkLayerTest, InvalidCmdBufferBufferDestroyed) {
     vkCmdFillBuffer(m_commandBuffer->handle(), buffer, 0, VK_WHOLE_SIZE, 0);
     m_commandBuffer->end();
 
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, " that is invalid because bound Buffer ");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
+                                         "UNASSIGNED-CoreValidation-DrawState-InvalidCommandBuffer-VkBuffer");
     // Destroy buffer dependency prior to submit to cause ERROR
     vkDestroyBuffer(m_device->device(), buffer, NULL);
 
@@ -2680,9 +2768,10 @@ TEST_F(VkLayerTest, InvalidCmdBufferBufferViewDestroyed) {
     ASSERT_NO_FATAL_FAILURE(Init());
     ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
 
-    OneOffDescriptorSet ds(m_device, {
-                                         {0, VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
-                                     });
+    OneOffDescriptorSet descriptor_set(m_device,
+                                       {
+                                           {0, VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
+                                       });
     CreatePipelineHelper pipe(*this);
     VkBufferCreateInfo buffer_create_info = {};
     VkBufferViewCreateInfo bvci = {};
@@ -2706,8 +2795,8 @@ TEST_F(VkLayerTest, InvalidCmdBufferBufferViewDestroyed) {
         VkResult err = vkCreateBufferView(m_device->device(), &bvci, NULL, &view);
         ASSERT_VK_SUCCESS(err);
 
-        ds.WriteDescriptorBufferView(0, view);
-        ds.UpdateDescriptorSets();
+        descriptor_set.WriteDescriptorBufferView(0, view);
+        descriptor_set.UpdateDescriptorSets();
 
         char const *fsSource =
             "#version 450\n"
@@ -2723,7 +2812,7 @@ TEST_F(VkLayerTest, InvalidCmdBufferBufferViewDestroyed) {
         pipe.InitInfo();
         pipe.InitState();
         pipe.shader_stages_ = {vs.GetStageCreateInfo(), fs.GetStageCreateInfo()};
-        pipe.pipeline_layout_ = VkPipelineLayoutObj(m_device, {&ds.layout_});
+        pipe.pipeline_layout_ = VkPipelineLayoutObj(m_device, {&descriptor_set.layout_});
         pipe.CreateGraphicsPipeline();
 
         m_commandBuffer->begin();
@@ -2736,7 +2825,7 @@ TEST_F(VkLayerTest, InvalidCmdBufferBufferViewDestroyed) {
         // Bind pipeline to cmd buffer - This causes crash on Mali
         vkCmdBindPipeline(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe.pipeline_);
         vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe.pipeline_layout_.handle(), 0, 1,
-                                &ds.set_, 0, nullptr);
+                                &descriptor_set.set_, 0, nullptr);
     }
     // buffer is released.
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "Descriptor in binding #0 index 0 is using buffer");
@@ -2754,12 +2843,12 @@ TEST_F(VkLayerTest, InvalidCmdBufferBufferViewDestroyed) {
     bvci.buffer = buffer.handle();
     VkResult err = vkCreateBufferView(m_device->device(), &bvci, NULL, &view);
     ASSERT_VK_SUCCESS(err);
-    ds.descriptor_writes.clear();
-    ds.WriteDescriptorBufferView(0, view);
-    ds.UpdateDescriptorSets();
+    descriptor_set.descriptor_writes.clear();
+    descriptor_set.WriteDescriptorBufferView(0, view);
+    descriptor_set.UpdateDescriptorSets();
 
     vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe.pipeline_layout_.handle(), 0, 1,
-                            &ds.set_, 0, nullptr);
+                            &descriptor_set.set_, 0, nullptr);
     m_commandBuffer->Draw(1, 0, 0, 0);
     m_commandBuffer->EndRenderPass();
     m_commandBuffer->end();
@@ -2771,7 +2860,8 @@ TEST_F(VkLayerTest, InvalidCmdBufferBufferViewDestroyed) {
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit_info.commandBufferCount = 1;
     submit_info.pCommandBuffers = &m_commandBuffer->handle();
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, " that is invalid because bound BufferView ");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
+                                         "UNASSIGNED-CoreValidation-DrawState-InvalidCommandBuffer-VkBufferView");
     vkQueueSubmit(m_device->m_queue, 1, &submit_info, VK_NULL_HANDLE);
     m_errorMonitor->VerifyFound();
 }
@@ -2814,8 +2904,10 @@ TEST_F(VkLayerTest, InvalidCmdBufferImageDestroyed) {
         m_commandBuffer->end();
     }
     // Destroy image dependency prior to submit to cause ERROR
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, " that is invalid because bound Image ");
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, " that is invalid because bound DeviceMemory ");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
+                                         "UNASSIGNED-CoreValidation-DrawState-InvalidCommandBuffer-VkImage");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
+                                         "UNASSIGNED-CoreValidation-DrawState-InvalidCommandBuffer-VkDeviceMemory");
 
     VkSubmitInfo submit_info = {};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -2889,8 +2981,10 @@ TEST_F(VkLayerTest, InvalidCmdBufferFramebufferImageDestroyed) {
     }
     // Destroy image attached to framebuffer to invalidate cmd buffer
     // Now attempt to submit cmd buffer and verify error
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, " that is invalid because bound Image ");
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, " that is invalid because bound DeviceMemory ");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
+                                         "UNASSIGNED-CoreValidation-DrawState-InvalidCommandBuffer-VkImage");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
+                                         "UNASSIGNED-CoreValidation-DrawState-InvalidCommandBuffer-VkDeviceMemory");
     m_commandBuffer->QueueCommandBuffer(false);
     m_errorMonitor->VerifyFound();
 
@@ -3106,9 +3200,9 @@ TEST_F(VkLayerTest, InvalidBufferViewObject) {
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkWriteDescriptorSet-descriptorType-00323");
     ASSERT_NO_FATAL_FAILURE(Init());
 
-    OneOffDescriptorSet ds(m_device, {
-                                         {0, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                     });
+    OneOffDescriptorSet descriptor_set(m_device, {
+                                                     {0, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                                 });
     VkBufferView view;
     {
         // Create a valid bufferView to start with
@@ -3136,7 +3230,7 @@ TEST_F(VkLayerTest, InvalidBufferViewObject) {
     VkWriteDescriptorSet descriptor_write;
     memset(&descriptor_write, 0, sizeof(descriptor_write));
     descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptor_write.dstSet = ds.set_;
+    descriptor_write.dstSet = descriptor_set.set_;
     descriptor_write.dstBinding = 0;
     descriptor_write.descriptorCount = 1;
     descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
@@ -3246,10 +3340,6 @@ TEST_F(VkLayerTest, InvalidBufferViewCreateInfoEntries) {
     buff_view_ci.offset = buffer.create_info().size;
     CreateBufferViewTest(*this, &buff_view_ci, "VUID-VkBufferViewCreateInfo-offset-00925");
 
-    // Offset must be a multiple of VkPhysicalDeviceLimits::minTexelBufferOffsetAlignment so add 1 to ensure it is not
-    buff_view_ci.offset = minTexelBufferOffsetAlignment + 1;
-    CreateBufferViewTest(*this, &buff_view_ci, "VUID-VkBufferViewCreateInfo-offset-00926");
-
     // Set offset to acceptable value for range tests
     buff_view_ci.offset = minTexelBufferOffsetAlignment;
     // Setting range equal to 0 will cause an error to occur
@@ -3286,8 +3376,7 @@ TEST_F(VkLayerTest, InvalidBufferViewCreateInfoEntries) {
 
 TEST_F(VkLayerTest, FillBufferWithinRenderPass) {
     // Call CmdFillBuffer within an active renderpass
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
-                                         "It is invalid to issue this call inside an active render pass");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkCmdFillBuffer-renderpass");
 
     ASSERT_NO_FATAL_FAILURE(Init());
     ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
@@ -3309,8 +3398,7 @@ TEST_F(VkLayerTest, FillBufferWithinRenderPass) {
 
 TEST_F(VkLayerTest, UpdateBufferWithinRenderPass) {
     // Call CmdUpdateBuffer within an active renderpass
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
-                                         "It is invalid to issue this call inside an active render pass");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkCmdUpdateBuffer-renderpass");
 
     ASSERT_NO_FATAL_FAILURE(Init());
     ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
@@ -3512,8 +3600,7 @@ TEST_F(VkLayerTest, ClearDepthStencilWithBadRange) {
 
 TEST_F(VkLayerTest, ClearColorImageWithinRenderPass) {
     // Call CmdClearColorImage within an active RenderPass
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
-                                         "It is invalid to issue this call inside an active render pass");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkCmdClearColorImage-renderpass");
 
     ASSERT_NO_FATAL_FAILURE(Init());
     ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
@@ -4409,7 +4496,7 @@ TEST_F(VkLayerTest, VertexBufferInvalid) {
         "Submit a command buffer using deleted vertex buffer, delete a buffer twice, use an invalid offset for each buffer type, "
         "and attempt to bind a null buffer");
 
-    const char *deleted_buffer_in_command_buffer = "Cannot submit cmd buffer using deleted buffer ";
+    const char *deleted_buffer_in_command_buffer = "UNASSIGNED-CoreValidation-DrawState-InvalidBuffer";
     const char *invalid_offset_message = "VUID-vkBindBufferMemory-memoryOffset-01036";
 
     ASSERT_NO_FATAL_FAILURE(Init());
@@ -4789,21 +4876,22 @@ TEST_F(VkLayerTest, InvalidStorageImageLayout) {
         return;
     }
 
-    OneOffDescriptorSet ds(m_device, {
-                                         {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
-                                     });
+    OneOffDescriptorSet descriptor_set(m_device,
+                                       {
+                                           {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
+                                       });
 
     VkImageObj image(m_device);
     image.Init(32, 32, 1, tex_format, VK_IMAGE_USAGE_STORAGE_BIT, tiling, 0);
     ASSERT_TRUE(image.initialized());
     VkImageView view = image.targetView(tex_format);
 
-    ds.WriteDescriptorImageView(0, view, 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+    descriptor_set.WriteDescriptorImageInfo(0, view, VK_NULL_HANDLE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
 
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
                                          " of VK_DESCRIPTOR_TYPE_STORAGE_IMAGE type is being updated with layout "
                                          "VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL but according to spec ");
-    ds.UpdateDescriptorSets();
+    descriptor_set.UpdateDescriptorSets();
     m_errorMonitor->VerifyFound();
 }
 
@@ -5773,14 +5861,30 @@ TEST_F(VkLayerTest, CreateImageMiscErrors) {
         image_ci.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
         image_ci.arrayLayers = 6;
         image_ci.imageType = VK_IMAGE_TYPE_1D;
+        m_errorMonitor->SetUnexpectedError("VUID-VkImageCreateInfo-imageType-00954");
         image_ci.extent = {64, 1, 1};
         CreateImageTest(*this, &image_ci, "VUID-VkImageCreateInfo-flags-00949");
 
         image_ci = safe_image_ci;
         image_ci.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
         image_ci.imageType = VK_IMAGE_TYPE_3D;
+        m_errorMonitor->SetUnexpectedError("VUID-VkImageCreateInfo-imageType-00954");
         image_ci.extent = {4, 4, 4};
         CreateImageTest(*this, &image_ci, "VUID-VkImageCreateInfo-flags-00949");
+
+        image_ci = safe_image_ci;
+        image_ci.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+        image_ci.imageType = VK_IMAGE_TYPE_2D;
+        image_ci.extent = {8, 6, 1};
+        image_ci.arrayLayers = 6;
+        CreateImageTest(*this, &image_ci, "VUID-VkImageCreateInfo-imageType-00954");
+
+        image_ci = safe_image_ci;
+        image_ci.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+        image_ci.imageType = VK_IMAGE_TYPE_2D;
+        image_ci.extent = {8, 8, 1};
+        image_ci.arrayLayers = 4;
+        CreateImageTest(*this, &image_ci, "VUID-VkImageCreateInfo-imageType-00954");
     }
 
     {
@@ -6072,6 +6176,26 @@ TEST_F(VkLayerTest, MultiplaneImageSamplerConversionMismatch) {
     ycbcr_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES;
     ycbcr_features.samplerYcbcrConversion = VK_TRUE;
     ASSERT_NO_FATAL_FAILURE(InitState(nullptr, &ycbcr_features));
+
+    PFN_vkCreateSamplerYcbcrConversionKHR vkCreateSamplerYcbcrConversionFunction = nullptr;
+    PFN_vkDestroySamplerYcbcrConversionKHR vkDestroySamplerYcbcrConversionFunction = nullptr;
+
+    if (DeviceValidationVersion() >= VK_API_VERSION_1_1) {
+        vkCreateSamplerYcbcrConversionFunction = vkCreateSamplerYcbcrConversion;
+        vkDestroySamplerYcbcrConversionFunction = vkDestroySamplerYcbcrConversion;
+    } else {
+        vkCreateSamplerYcbcrConversionFunction =
+            (PFN_vkCreateSamplerYcbcrConversionKHR)vkGetDeviceProcAddr(m_device->handle(), "vkCreateSamplerYcbcrConversionKHR");
+        vkDestroySamplerYcbcrConversionFunction =
+            (PFN_vkDestroySamplerYcbcrConversionKHR)vkGetDeviceProcAddr(m_device->handle(), "vkDestroySamplerYcbcrConversionKHR");
+    }
+
+    if (!vkCreateSamplerYcbcrConversionFunction || !vkDestroySamplerYcbcrConversionFunction) {
+        printf("%s Did not find required device extension %s; test skipped.\n", kSkipPrefix,
+               VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME);
+        return;
+    }
+
     ASSERT_NO_FATAL_FAILURE(InitViewport());
     ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
 
@@ -6109,9 +6233,9 @@ TEST_F(VkLayerTest, MultiplaneImageSamplerConversionMismatch) {
                                                             VK_FILTER_NEAREST,
                                                             false};
     VkSamplerYcbcrConversion conversions[2];
-    vkCreateSamplerYcbcrConversion(m_device->handle(), &ycbcr_create_info, nullptr, &conversions[0]);
+    vkCreateSamplerYcbcrConversionFunction(m_device->handle(), &ycbcr_create_info, nullptr, &conversions[0]);
     ycbcr_create_info.components.r = VK_COMPONENT_SWIZZLE_ZERO;  // Just anything different than above
-    vkCreateSamplerYcbcrConversion(m_device->handle(), &ycbcr_create_info, nullptr, &conversions[1]);
+    vkCreateSamplerYcbcrConversionFunction(m_device->handle(), &ycbcr_create_info, nullptr, &conversions[1]);
 
     VkSamplerYcbcrConversionInfo ycbcr_info = {};
     ycbcr_info.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO;
@@ -6148,9 +6272,10 @@ TEST_F(VkLayerTest, MultiplaneImageSamplerConversionMismatch) {
     vkCreateImageView(m_device->device(), &ivci, nullptr, &view);
 
     // Use the image and sampler together in a descriptor set
-    OneOffDescriptorSet ds(m_device, {
-                                         {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2, VK_SHADER_STAGE_ALL, samplers},
-                                     });
+    OneOffDescriptorSet descriptor_set(m_device,
+                                       {
+                                           {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2, VK_SHADER_STAGE_ALL, samplers},
+                                       });
 
     // Use the same image view twice, using the same sampler, with the *second* mismatched with the *second* immutable sampler
     VkDescriptorImageInfo image_infos[2];
@@ -6163,7 +6288,7 @@ TEST_F(VkLayerTest, MultiplaneImageSamplerConversionMismatch) {
     // Update the descriptor set expecting to get an error
     VkWriteDescriptorSet descriptor_write = {};
     descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptor_write.dstSet = ds.set_;
+    descriptor_write.dstSet = descriptor_set.set_;
     descriptor_write.dstBinding = 0;
     descriptor_write.descriptorCount = 2;
     descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -6173,20 +6298,21 @@ TEST_F(VkLayerTest, MultiplaneImageSamplerConversionMismatch) {
     vkUpdateDescriptorSets(m_device->device(), 1, &descriptor_write, 0, NULL);
     m_errorMonitor->VerifyFound();
 
-    // pImmutableSamplers = nullptr causes an error , VUID-01947.
+    // pImmutableSamplers = nullptr causes an error , VUID-VkWriteDescriptorSet-descriptorType-02738.
     // Because if pNext chains a VkSamplerYcbcrConversionInfo, the sampler has to be a immutable sampler.
-    OneOffDescriptorSet ds_1947(m_device, {
-                                              {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                          });
-    descriptor_write.dstSet = ds_1947.set_;
+    OneOffDescriptorSet descriptor_set_1947(m_device,
+                                            {
+                                                {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                            });
+    descriptor_write.dstSet = descriptor_set_1947.set_;
     descriptor_write.descriptorCount = 1;
     descriptor_write.pImageInfo = &image_infos[0];
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkWriteDescriptorSet-descriptorType-01947");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkWriteDescriptorSet-descriptorType-02738");
     vkUpdateDescriptorSets(m_device->device(), 1, &descriptor_write, 0, NULL);
     m_errorMonitor->VerifyFound();
 
-    vkDestroySamplerYcbcrConversion(m_device->device(), conversions[0], nullptr);
-    vkDestroySamplerYcbcrConversion(m_device->device(), conversions[1], nullptr);
+    vkDestroySamplerYcbcrConversionFunction(m_device->device(), conversions[0], nullptr);
+    vkDestroySamplerYcbcrConversionFunction(m_device->device(), conversions[1], nullptr);
     vkDestroyImageView(m_device->device(), view, NULL);
     vkDestroySampler(m_device->device(), samplers[0], nullptr);
     vkDestroySampler(m_device->device(), samplers[1], nullptr);
@@ -6208,9 +6334,6 @@ TEST_F(VkLayerTest, DepthStencilImageViewWithColorAspectBitError) {
         printf("%s Couldn't find depth stencil format.\n", kSkipPrefix);
         return;
     }
-    OneOffDescriptorSet ds(m_device, {
-                                         {0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                     });
 
     VkImageObj image_bad(m_device);
     VkImageObj image_good(m_device);
@@ -6549,6 +6672,19 @@ TEST_F(VkLayerTest, CreateYCbCrSampler) {
     ASSERT_NO_FATAL_FAILURE(InitState());
     VkDevice dev = m_device->device();
 
+    PFN_vkCreateSamplerYcbcrConversionKHR vkCreateSamplerYcbcrConversionFunction = nullptr;
+    if (DeviceValidationVersion() >= VK_API_VERSION_1_1) {
+        vkCreateSamplerYcbcrConversionFunction = vkCreateSamplerYcbcrConversion;
+    } else {
+        vkCreateSamplerYcbcrConversionFunction =
+            (PFN_vkCreateSamplerYcbcrConversionKHR)vkGetDeviceProcAddr(m_device->handle(), "vkCreateSamplerYcbcrConversionKHR");
+    }
+
+    if (!vkCreateSamplerYcbcrConversionFunction) {
+        printf("%s Did not find required device support for YcbcrSamplerConversion; test skipped.\n", kSkipPrefix);
+        return;
+    }
+
     // Verify we have the requested support
     bool ycbcr_support = (DeviceExtensionEnabled(VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME) ||
                           (DeviceValidationVersion() >= VK_API_VERSION_1_1));
@@ -6566,7 +6702,7 @@ TEST_F(VkLayerTest, CreateYCbCrSampler) {
     sycci.ycbcrRange = VK_SAMPLER_YCBCR_RANGE_ITU_FULL;
 
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkSamplerYcbcrConversionCreateInfo-format-01649");
-    vkCreateSamplerYcbcrConversion(dev, &sycci, NULL, &ycbcr_conv);
+    vkCreateSamplerYcbcrConversionFunction(dev, &sycci, NULL, &ycbcr_conv);
     m_errorMonitor->VerifyFound();
 }
 
@@ -6759,4 +6895,234 @@ TEST_F(VkLayerTest, CreateImageYcbcrArrayLayers) {
 
     CreateImageTest(*this, &image_create_info, "VUID-VkImageCreateInfo-format-02653");
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkImageCreateInfo-format-02653");
+}
+
+TEST_F(VkLayerTest, BindImageMemorySwapchain) {
+    TEST_DESCRIPTION("Invalid bind image with a swapchain");
+    SetTargetApiVersion(VK_API_VERSION_1_1);
+
+    if (!AddSurfaceInstanceExtension()) {
+        printf("%s surface extensions not supported, skipping BindSwapchainImageMemory test\n", kSkipPrefix);
+        return;
+    }
+
+    ASSERT_NO_FATAL_FAILURE(InitFramework(myDbgFunc, m_errorMonitor));
+
+    if (!AddSwapchainDeviceExtension()) {
+        printf("%s swapchain extensions not supported, skipping BindSwapchainImageMemory test\n", kSkipPrefix);
+        return;
+    }
+
+    if (DeviceValidationVersion() < VK_API_VERSION_1_1) {
+        printf("%s VkBindImageMemoryInfo requires Vulkan 1.1+, skipping test\n", kSkipPrefix);
+        return;
+    }
+
+    ASSERT_NO_FATAL_FAILURE(InitState());
+    ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
+    if (!InitSwapchain()) {
+        printf("%s Cannot create surface or swapchain, skipping BindSwapchainImageMemory test\n", kSkipPrefix);
+        return;
+    }
+
+    auto image_create_info = lvl_init_struct<VkImageCreateInfo>();
+    image_create_info.imageType = VK_IMAGE_TYPE_2D;
+    image_create_info.format = VK_FORMAT_R8G8B8A8_UNORM;
+    image_create_info.extent.width = 64;
+    image_create_info.extent.height = 64;
+    image_create_info.extent.depth = 1;
+    image_create_info.mipLevels = 1;
+    image_create_info.arrayLayers = 1;
+    image_create_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_create_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_create_info.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
+    image_create_info.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    image_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    auto image_swapchain_create_info = lvl_init_struct<VkImageSwapchainCreateInfoKHR>();
+    image_swapchain_create_info.swapchain = m_swapchain;
+    image_create_info.pNext = &image_swapchain_create_info;
+
+    VkImage image_from_swapchain;
+    vkCreateImage(device(), &image_create_info, NULL, &image_from_swapchain);
+
+    VkMemoryRequirements mem_reqs = {};
+    vkGetImageMemoryRequirements(device(), image_from_swapchain, &mem_reqs);
+
+    auto alloc_info = lvl_init_struct<VkMemoryAllocateInfo>();
+    alloc_info.memoryTypeIndex = 0;
+    alloc_info.allocationSize = mem_reqs.size;
+
+    bool pass = m_device->phy().set_memory_type(mem_reqs.memoryTypeBits, &alloc_info, 0);
+    ASSERT_TRUE(pass);
+
+    VkDeviceMemory mem;
+    VkResult err = vkAllocateMemory(m_device->device(), &alloc_info, NULL, &mem);
+    ASSERT_VK_SUCCESS(err);
+
+    auto bind_info = lvl_init_struct<VkBindImageMemoryInfo>();
+    bind_info.image = image_from_swapchain;
+    bind_info.memory = VK_NULL_HANDLE;
+    bind_info.memoryOffset = 0;
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkBindImageMemoryInfo-image-01630");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkBindImageMemoryInfo-pNext-01632");
+    vkBindImageMemory2(m_device->device(), 1, &bind_info);
+    m_errorMonitor->VerifyFound();
+
+    auto bind_swapchain_info = lvl_init_struct<VkBindImageMemorySwapchainInfoKHR>();
+    bind_swapchain_info.swapchain = VK_NULL_HANDLE;
+    bind_swapchain_info.imageIndex = 0;
+    bind_info.pNext = &bind_swapchain_info;
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "UNASSIGNED-GeneralParameterError-RequiredParameter");
+    vkBindImageMemory2(m_device->device(), 1, &bind_info);
+    m_errorMonitor->VerifyFound();
+
+    bind_info.memory = mem;
+    bind_swapchain_info.swapchain = m_swapchain;
+    bind_swapchain_info.imageIndex = UINT32_MAX;
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkBindImageMemoryInfo-pNext-01631");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkBindImageMemorySwapchainInfoKHR-imageIndex-01644");
+    vkBindImageMemory2(m_device->device(), 1, &bind_info);
+    m_errorMonitor->VerifyFound();
+
+    vkDestroyImage(m_device->device(), image_from_swapchain, NULL);
+    vkFreeMemory(m_device->device(), mem, NULL);
+    DestroySwapchain();
+}
+
+TEST_F(VkLayerTest, TransferImageToSwapchainWithInvalidLayoutDeviceGroup) {
+    TEST_DESCRIPTION("Transfer an image to a swapchain's image with a invalid layout between device group");
+
+#if defined(VK_USE_PLATFORM_ANDROID_KHR)
+    printf(
+        "%s According to VUID-01631, VkBindImageMemoryInfo-memory should be NULL. But Android will crash if memory is NULL, "
+        "skipping test\n",
+        kSkipPrefix);
+    return;
+#endif
+
+    SetTargetApiVersion(VK_API_VERSION_1_1);
+
+    if (!AddSurfaceInstanceExtension()) {
+        printf("%s surface extensions not supported, skipping test\n", kSkipPrefix);
+        return;
+    }
+
+    ASSERT_NO_FATAL_FAILURE(InitFramework(myDbgFunc, m_errorMonitor));
+
+    if (!AddSwapchainDeviceExtension()) {
+        printf("%s swapchain extensions not supported, skipping test\n", kSkipPrefix);
+        return;
+    }
+
+    if (DeviceValidationVersion() < VK_API_VERSION_1_1) {
+        printf("%s VkBindImageMemoryInfo requires Vulkan 1.1+, skipping test\n", kSkipPrefix);
+        return;
+    }
+    uint32_t physical_device_group_count = 0;
+    vkEnumeratePhysicalDeviceGroups(instance(), &physical_device_group_count, nullptr);
+
+    if (physical_device_group_count == 0) {
+        printf("%s physical_device_group_count is 0, skipping test\n", kSkipPrefix);
+        return;
+    }
+
+    std::vector<VkPhysicalDeviceGroupProperties> physical_device_group(physical_device_group_count,
+                                                                       {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GROUP_PROPERTIES});
+    vkEnumeratePhysicalDeviceGroups(instance(), &physical_device_group_count, physical_device_group.data());
+    VkDeviceGroupDeviceCreateInfo create_device_pnext = {};
+    create_device_pnext.sType = VK_STRUCTURE_TYPE_DEVICE_GROUP_DEVICE_CREATE_INFO;
+    create_device_pnext.physicalDeviceCount = physical_device_group[0].physicalDeviceCount;
+    create_device_pnext.pPhysicalDevices = physical_device_group[0].physicalDevices;
+    ASSERT_NO_FATAL_FAILURE(InitState(nullptr, &create_device_pnext));
+    ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
+    if (!InitSwapchain(VK_IMAGE_USAGE_TRANSFER_DST_BIT)) {
+        printf("%s Cannot create surface or swapchain, skipping test\n", kSkipPrefix);
+        return;
+    }
+
+    auto image_create_info = lvl_init_struct<VkImageCreateInfo>();
+    image_create_info.imageType = VK_IMAGE_TYPE_2D;
+    image_create_info.format = VK_FORMAT_R8G8B8A8_UNORM;
+    image_create_info.extent.width = 64;
+    image_create_info.extent.height = 64;
+    image_create_info.extent.depth = 1;
+    image_create_info.mipLevels = 1;
+    image_create_info.arrayLayers = 1;
+    image_create_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_create_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_create_info.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
+    image_create_info.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    image_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VkImageObj src_Image(m_device);
+    src_Image.init(&image_create_info);
+
+    image_create_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    image_create_info.flags = VK_IMAGE_CREATE_ALIAS_BIT;
+
+    auto image_swapchain_create_info = lvl_init_struct<VkImageSwapchainCreateInfoKHR>();
+    image_swapchain_create_info.swapchain = m_swapchain;
+    image_create_info.pNext = &image_swapchain_create_info;
+
+    VkImage peer_image;
+    vkCreateImage(device(), &image_create_info, NULL, &peer_image);
+
+    auto bind_devicegroup_info = lvl_init_struct<VkBindImageMemoryDeviceGroupInfo>();
+    bind_devicegroup_info.deviceIndexCount = 2;
+    std::array<uint32_t, 2> deviceIndices = {0, 0};
+    bind_devicegroup_info.pDeviceIndices = deviceIndices.data();
+    bind_devicegroup_info.splitInstanceBindRegionCount = 0;
+    bind_devicegroup_info.pSplitInstanceBindRegions = nullptr;
+
+    auto bind_swapchain_info = lvl_init_struct<VkBindImageMemorySwapchainInfoKHR>(&bind_devicegroup_info);
+    bind_swapchain_info.swapchain = m_swapchain;
+    bind_swapchain_info.imageIndex = 0;
+
+    auto bind_info = lvl_init_struct<VkBindImageMemoryInfo>(&bind_swapchain_info);
+    bind_info.image = peer_image;
+    bind_info.memory = VK_NULL_HANDLE;
+    bind_info.memoryOffset = 0;
+
+    vkBindImageMemory2(m_device->device(), 1, &bind_info);
+
+    uint32_t swapchain_images_count = 0;
+    vkGetSwapchainImagesKHR(device(), m_swapchain, &swapchain_images_count, nullptr);
+    std::vector<VkImage> swapchain_images;
+    swapchain_images.resize(swapchain_images_count);
+    vkGetSwapchainImagesKHR(device(), m_swapchain, &swapchain_images_count, swapchain_images.data());
+
+    m_commandBuffer->begin();
+
+    VkImageCopy copy_region = {};
+    copy_region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy_region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy_region.srcSubresource.mipLevel = 0;
+    copy_region.dstSubresource.mipLevel = 0;
+    copy_region.srcSubresource.baseArrayLayer = 0;
+    copy_region.dstSubresource.baseArrayLayer = 0;
+    copy_region.srcSubresource.layerCount = 1;
+    copy_region.dstSubresource.layerCount = 1;
+    copy_region.srcOffset = {0, 0, 0};
+    copy_region.dstOffset = {0, 0, 0};
+    copy_region.extent = {10, 10, 1};
+    vkCmdCopyImage(m_commandBuffer->handle(), src_Image.handle(), VK_IMAGE_LAYOUT_GENERAL, peer_image,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
+
+    m_commandBuffer->end();
+
+    VkSubmitInfo submit_info = {};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &m_commandBuffer->handle();
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout");
+    vkQueueSubmit(m_device->m_queue, 1, &submit_info, VK_NULL_HANDLE);
+    m_errorMonitor->VerifyFound();
+
+    vkDestroyImage(m_device->device(), peer_image, NULL);
+    DestroySwapchain();
 }

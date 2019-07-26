@@ -31,6 +31,30 @@
 //
 // These tests do not expect to encounter ANY validation errors pass only if this is true
 
+TEST_F(VkPositiveLayerTest, NullFunctionPointer) {
+    TEST_DESCRIPTION("On 1_0 instance , call GetDeviceProcAddr on promoted 1_1 device-level entrypoint");
+    SetTargetApiVersion(VK_API_VERSION_1_0);
+
+    ASSERT_NO_FATAL_FAILURE(InitFramework(myDbgFunc, m_errorMonitor));
+
+    if (DeviceExtensionSupported(gpu(), nullptr, "VK_KHR_get_memory_requirements2")) {
+        m_device_extension_names.push_back("VK_KHR_get_memory_requirements2");
+    } else {
+        printf("%s VK_KHR_get_memory_reqirements2 extension not supported, skipping NullFunctionPointer test\n", kSkipPrefix);
+        return;
+    }
+
+    ASSERT_NO_FATAL_FAILURE(InitState());
+
+    m_errorMonitor->ExpectSuccess();
+    auto fpGetBufferMemoryRequirements =
+        (PFN_vkGetBufferMemoryRequirements2)vkGetDeviceProcAddr(m_device->device(), "vkGetBufferMemoryRequirements2");
+    if (fpGetBufferMemoryRequirements) {
+        m_errorMonitor->SetError("Null was expected!");
+    }
+    m_errorMonitor->VerifyNotFound();
+}
+
 TEST_F(VkPositiveLayerTest, SecondaryCommandBufferBarrier) {
     TEST_DESCRIPTION("Add a pipeline barrier in a secondary command buffer");
     ASSERT_NO_FATAL_FAILURE(Init());
@@ -722,6 +746,69 @@ TEST_F(VkPositiveLayerTest, DestroyPipelineRenderPass) {
     vkQueueWaitIdle(m_device->m_queue);
 }
 
+TEST_F(VkPositiveLayerTest, BasicQuery) {
+    TEST_DESCRIPTION("Use a couple occlusion queries");
+    m_errorMonitor->ExpectSuccess();
+    ASSERT_NO_FATAL_FAILURE(Init());
+    ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
+
+    uint32_t qfi = 0;
+    VkBufferCreateInfo bci = {};
+    bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bci.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    bci.size = 4 * sizeof(uint64_t);
+    bci.queueFamilyIndexCount = 1;
+    bci.pQueueFamilyIndices = &qfi;
+    VkBufferObj buffer;
+    VkMemoryPropertyFlags mem_props = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    buffer.init(*m_device, bci, mem_props);
+
+    VkQueryPool query_pool;
+    VkQueryPoolCreateInfo query_pool_info;
+    query_pool_info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+    query_pool_info.pNext = NULL;
+    query_pool_info.queryType = VK_QUERY_TYPE_OCCLUSION;
+    query_pool_info.flags = 0;
+    query_pool_info.queryCount = 2;
+    query_pool_info.pipelineStatistics = 0;
+
+    VkResult res = vkCreateQueryPool(m_device->handle(), &query_pool_info, NULL, &query_pool);
+    ASSERT_VK_SUCCESS(res);
+
+    CreatePipelineHelper pipe(*this);
+    pipe.InitInfo();
+    pipe.InitState();
+    pipe.CreateGraphicsPipeline();
+
+    m_commandBuffer->begin();
+    vkCmdResetQueryPool(m_commandBuffer->handle(), query_pool, 0, 2);
+    m_commandBuffer->BeginRenderPass(m_renderPassBeginInfo);
+    vkCmdBeginQuery(m_commandBuffer->handle(), query_pool, 0, 0);
+    vkCmdEndQuery(m_commandBuffer->handle(), query_pool, 0);
+    vkCmdBindPipeline(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe.pipeline_);
+    vkCmdBeginQuery(m_commandBuffer->handle(), query_pool, 1, 0);
+    vkCmdDraw(m_commandBuffer->handle(), 3, 1, 0, 0);
+    vkCmdEndRenderPass(m_commandBuffer->handle());
+    vkCmdEndQuery(m_commandBuffer->handle(), query_pool, 1);
+    vkCmdCopyQueryPoolResults(m_commandBuffer->handle(), query_pool, 0, 2, buffer.handle(), 0, sizeof(uint64_t),
+                              VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+    m_commandBuffer->end();
+
+    VkSubmitInfo submit_info = {};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &m_commandBuffer->handle();
+    vkQueueSubmit(m_device->m_queue, 1, &submit_info, VK_NULL_HANDLE);
+
+    vkQueueWaitIdle(m_device->m_queue);
+    uint64_t samples_passed[4];
+    res = vkGetQueryPoolResults(m_device->handle(), query_pool, 0, 2, sizeof(samples_passed), samples_passed, sizeof(uint64_t),
+                                VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+    ASSERT_VK_SUCCESS(res);
+    m_errorMonitor->VerifyNotFound();
+    vkDestroyQueryPool(m_device->handle(), query_pool, NULL);
+}
+
 TEST_F(VkPositiveLayerTest, MultiplaneGetImageSubresourceLayout) {
     TEST_DESCRIPTION("Positive test, query layout of a single plane of a multiplane image. (repro Github #2530)");
 
@@ -916,15 +1003,15 @@ TEST_F(VkPositiveLayerTest, CopyNonupdatedDescriptors) {
     unsigned int i;
 
     ASSERT_NO_FATAL_FAILURE(Init());
-    OneOffDescriptorSet src_ds(m_device, {
-                                             {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                             {1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                             {2, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                         });
-    OneOffDescriptorSet dst_ds(m_device, {
-                                             {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                             {1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                         });
+    OneOffDescriptorSet src_descriptor_set(m_device, {
+                                                         {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                                         {1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                                         {2, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                                     });
+    OneOffDescriptorSet dst_descriptor_set(m_device, {
+                                                         {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                                         {1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                                     });
 
     m_errorMonitor->ExpectSuccess();
 
@@ -933,9 +1020,9 @@ TEST_F(VkPositiveLayerTest, CopyNonupdatedDescriptors) {
     memset(copy_ds_update, 0, sizeof(copy_ds_update));
     for (i = 0; i < copy_size; i++) {
         copy_ds_update[i].sType = VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET;
-        copy_ds_update[i].srcSet = src_ds.set_;
+        copy_ds_update[i].srcSet = src_descriptor_set.set_;
         copy_ds_update[i].srcBinding = i;
-        copy_ds_update[i].dstSet = dst_ds.set_;
+        copy_ds_update[i].dstSet = dst_descriptor_set.set_;
         copy_ds_update[i].dstBinding = i;
         copy_ds_update[i].descriptorCount = 1;
     }
@@ -1068,6 +1155,89 @@ TEST_F(VkPositiveLayerTest, ShaderRelaxedBlockLayout) {
     m_errorMonitor->ExpectSuccess();
     VkShaderObj vs(m_device, spv_source, VK_SHADER_STAGE_VERTEX_BIT, this);
     m_errorMonitor->VerifyNotFound();
+}
+
+TEST_F(VkPositiveLayerTest, ShaderUboStd430Layout) {
+    // This is a positive test, no errors expected
+    // Verifies the ability to scalar block layout rules with a shader that requires them to be relaxed
+    TEST_DESCRIPTION("Create a shader that requires UBO std430 layout.");
+    // Enable req'd extensions
+    if (!InstanceExtensionSupported(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME)) {
+        printf("%s Extension %s not supported, skipping this pass. \n", kSkipPrefix,
+               VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+        return;
+    }
+    m_instance_extension_names.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+    ASSERT_NO_FATAL_FAILURE(InitFramework(myDbgFunc, m_errorMonitor));
+
+    // Check for the UBO standard block layout extension and turn it on if it's available
+    if (!DeviceExtensionSupported(gpu(), nullptr, VK_KHR_UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION_NAME)) {
+        printf("%s Extension %s not supported, skipping this pass. \n", kSkipPrefix,
+               VK_KHR_UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION_NAME);
+        return;
+    }
+    m_device_extension_names.push_back(VK_KHR_UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION_NAME);
+
+    PFN_vkGetPhysicalDeviceFeatures2 vkGetPhysicalDeviceFeatures2 =
+        (PFN_vkGetPhysicalDeviceFeatures2)vkGetInstanceProcAddr(instance(), "vkGetPhysicalDeviceFeatures2KHR");
+
+    auto uniform_buffer_standard_layout_features = lvl_init_struct<VkPhysicalDeviceUniformBufferStandardLayoutFeaturesKHR>(NULL);
+    uniform_buffer_standard_layout_features.uniformBufferStandardLayout = VK_TRUE;
+    auto query_features2 = lvl_init_struct<VkPhysicalDeviceFeatures2>(&uniform_buffer_standard_layout_features);
+    vkGetPhysicalDeviceFeatures2(gpu(), &query_features2);
+
+    auto set_features2 = lvl_init_struct<VkPhysicalDeviceFeatures2>(&uniform_buffer_standard_layout_features);
+
+    ASSERT_NO_FATAL_FAILURE(InitState(nullptr, &set_features2));
+    ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
+
+    // Vertex shader requiring std430 in a uniform buffer.
+    // Without uniform buffer standard layout, we would expect a message like:
+    // "Structure id 3 decorated as Block for variable in Uniform storage class
+    // must follow standard uniform buffer layout rules: member 0 is an array
+    // with stride 4 not satisfying alignment to 16"
+
+    const std::string spv_source = R"(
+               OpCapability Shader
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint Vertex %main "main"
+               OpSource GLSL 460
+               OpDecorate %_arr_float_uint_8 ArrayStride 4
+               OpMemberDecorate %foo 0 Offset 0
+               OpDecorate %foo Block
+               OpDecorate %b DescriptorSet 0
+               OpDecorate %b Binding 0
+       %void = OpTypeVoid
+          %3 = OpTypeFunction %void
+      %float = OpTypeFloat 32
+       %uint = OpTypeInt 32 0
+     %uint_8 = OpConstant %uint 8
+%_arr_float_uint_8 = OpTypeArray %float %uint_8
+        %foo = OpTypeStruct %_arr_float_uint_8
+%_ptr_Uniform_foo = OpTypePointer Uniform %foo
+          %b = OpVariable %_ptr_Uniform_foo Uniform
+       %main = OpFunction %void None %3
+          %5 = OpLabel
+               OpReturn
+               OpFunctionEnd
+        )";
+
+    std::vector<unsigned int> spv;
+    VkShaderModuleCreateInfo module_create_info;
+    VkShaderModule shader_module;
+    module_create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    module_create_info.pNext = NULL;
+    ASMtoSPV(SPV_ENV_VULKAN_1_0, 0, spv_source.data(), spv);
+    module_create_info.pCode = spv.data();
+    module_create_info.codeSize = spv.size() * sizeof(unsigned int);
+    module_create_info.flags = 0;
+
+    m_errorMonitor->ExpectSuccess();
+    VkResult err = vkCreateShaderModule(m_device->handle(), &module_create_info, NULL, &shader_module);
+    m_errorMonitor->VerifyNotFound();
+    if (err == VK_SUCCESS) {
+        vkDestroyShaderModule(m_device->handle(), shader_module, NULL);
+    }
 }
 
 TEST_F(VkPositiveLayerTest, ShaderScalarBlockLayout) {
@@ -1735,7 +1905,7 @@ TEST_F(VkPositiveLayerTest, SecondaryCommandBufferClearColorAttachments) {
     color_attachment.clearValue.color.float32[2] = 0;
     color_attachment.clearValue.color.float32[3] = 0;
     color_attachment.colorAttachment = 0;
-    VkClearRect clear_rect = {{{0, 0}, {32, 32}}};
+    VkClearRect clear_rect = {{{0, 0}, {32, 32}}, 0, 1};
     vkCmdClearAttachments(secondary_command_buffer, 1, &color_attachment, 1, &clear_rect);
     vkEndCommandBuffer(secondary_command_buffer);
     m_commandBuffer->begin();
@@ -1866,9 +2036,9 @@ TEST_F(VkPositiveLayerTest, IgnoreUnrelatedDescriptor) {
 
         VkImageView view = image.targetView(VK_FORMAT_B8G8R8A8_UNORM);
 
-        OneOffDescriptorSet ds(m_device, {
-                                             {0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                         });
+        OneOffDescriptorSet descriptor_set(m_device, {
+                                                         {0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                                     });
 
         VkDescriptorImageInfo image_info = {};
         image_info.imageView = view;
@@ -1877,7 +2047,7 @@ TEST_F(VkPositiveLayerTest, IgnoreUnrelatedDescriptor) {
         VkWriteDescriptorSet descriptor_write;
         memset(&descriptor_write, 0, sizeof(descriptor_write));
         descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptor_write.dstSet = ds.set_;
+        descriptor_write.dstSet = descriptor_set.set_;
         descriptor_write.dstBinding = 0;
         descriptor_write.descriptorCount = 1;
         descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
@@ -1912,9 +2082,9 @@ TEST_F(VkPositiveLayerTest, IgnoreUnrelatedDescriptor) {
         VkBufferObj buffer;
         buffer.init(*m_device, buffer_create_info);
 
-        OneOffDescriptorSet ds(m_device, {
-                                             {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                         });
+        OneOffDescriptorSet descriptor_set(m_device, {
+                                                         {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                                     });
 
         VkDescriptorBufferInfo buffer_info = {};
         buffer_info.buffer = buffer.handle();
@@ -1924,7 +2094,7 @@ TEST_F(VkPositiveLayerTest, IgnoreUnrelatedDescriptor) {
         VkWriteDescriptorSet descriptor_write;
         memset(&descriptor_write, 0, sizeof(descriptor_write));
         descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptor_write.dstSet = ds.set_;
+        descriptor_write.dstSet = descriptor_set.set_;
         descriptor_write.dstBinding = 0;
         descriptor_write.descriptorCount = 1;
         descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -1967,14 +2137,15 @@ TEST_F(VkPositiveLayerTest, IgnoreUnrelatedDescriptor) {
         VkBufferView buffer_view;
         VkResult err = vkCreateBufferView(m_device->device(), &buff_view_ci, NULL, &buffer_view);
         ASSERT_VK_SUCCESS(err);
-        OneOffDescriptorSet ds(m_device, {
-                                             {0, VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
-                                         });
+        OneOffDescriptorSet descriptor_set(m_device,
+                                           {
+                                               {0, VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                           });
 
         VkWriteDescriptorSet descriptor_write;
         memset(&descriptor_write, 0, sizeof(descriptor_write));
         descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptor_write.dstSet = ds.set_;
+        descriptor_write.dstSet = descriptor_set.set_;
         descriptor_write.dstBinding = 0;
         descriptor_write.descriptorCount = 1;
         descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
@@ -2003,23 +2174,23 @@ TEST_F(VkPositiveLayerTest, ImmutableSamplerOnlyDescriptor) {
     ASSERT_NO_FATAL_FAILURE(Init());
     ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
 
-    OneOffDescriptorSet ds(m_device, {
-                                         {0, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
-                                     });
+    OneOffDescriptorSet descriptor_set(m_device, {
+                                                     {0, VK_DESCRIPTOR_TYPE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
+                                                 });
 
     VkSamplerCreateInfo sampler_ci = SafeSaneSamplerCreateInfo();
     VkSampler sampler;
     VkResult err = vkCreateSampler(m_device->device(), &sampler_ci, NULL, &sampler);
     ASSERT_VK_SUCCESS(err);
 
-    const VkPipelineLayoutObj pipeline_layout(m_device, {&ds.layout_});
+    const VkPipelineLayoutObj pipeline_layout(m_device, {&descriptor_set.layout_});
 
     m_errorMonitor->ExpectSuccess();
     m_commandBuffer->begin();
     m_commandBuffer->BeginRenderPass(m_renderPassBeginInfo);
 
-    vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout.handle(), 0, 1, &ds.set_, 0,
-                            nullptr);
+    vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout.handle(), 0, 1,
+                            &descriptor_set.set_, 0, nullptr);
     m_errorMonitor->VerifyNotFound();
 
     vkDestroySampler(m_device->device(), sampler, NULL);
@@ -2218,7 +2389,8 @@ TEST_F(VkPositiveLayerTest, PushDescriptorUnboundSetTest) {
     dsl_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     dsl_binding.pImmutableSamplers = NULL;
 
-    OneOffDescriptorSet ds(m_device, {dsl_binding}, 0, nullptr, VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT, nullptr);
+    OneOffDescriptorSet descriptor_set(m_device, {dsl_binding}, 0, nullptr, VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+                                       nullptr);
 
     // Create push descriptor set layout
     const VkDescriptorSetLayoutObj push_ds_layout(m_device, {dsl_binding}, VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR);
@@ -2240,15 +2412,15 @@ TEST_F(VkPositiveLayerTest, PushDescriptorUnboundSetTest) {
     pipe.shader_stages_ = {vs.GetStageCreateInfo(), fs.GetStageCreateInfo()};
     pipe.InitState();
     // Now use the descriptor layouts to create a pipeline layout
-    pipe.pipeline_layout_ = VkPipelineLayoutObj(m_device, {&push_ds_layout, &ds.layout_});
+    pipe.pipeline_layout_ = VkPipelineLayoutObj(m_device, {&push_ds_layout, &descriptor_set.layout_});
     pipe.CreateGraphicsPipeline();
 
     const float bo_data[1] = {1.f};
     VkConstantBufferObj buffer(m_device, sizeof(bo_data), (const void *)&bo_data, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
 
     // Update descriptor set
-    ds.WriteDescriptorBuffer(2, buffer.handle(), sizeof(bo_data));
-    ds.UpdateDescriptorSets();
+    descriptor_set.WriteDescriptorBufferInfo(2, buffer.handle(), sizeof(bo_data));
+    descriptor_set.UpdateDescriptorSets();
 
     PFN_vkCmdPushDescriptorSetKHR vkCmdPushDescriptorSetKHR =
         (PFN_vkCmdPushDescriptorSetKHR)vkGetDeviceProcAddr(m_device->device(), "vkCmdPushDescriptorSetKHR");
@@ -2260,9 +2432,9 @@ TEST_F(VkPositiveLayerTest, PushDescriptorUnboundSetTest) {
 
     // Push descriptors and bind descriptor set
     vkCmdPushDescriptorSetKHR(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe.pipeline_layout_.handle(), 0, 1,
-                              ds.descriptor_writes.data());
+                              descriptor_set.descriptor_writes.data());
     vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe.pipeline_layout_.handle(), 1, 1,
-                            &ds.set_, 0, NULL);
+                            &descriptor_set.set_, 0, NULL);
 
     // No errors should be generated.
     vkCmdDraw(m_commandBuffer->handle(), 3, 1, 0, 0);
@@ -2743,11 +2915,12 @@ TEST_F(VkPositiveLayerTest, DynamicOffsetWithInactiveBinding) {
     ASSERT_NO_FATAL_FAILURE(InitViewport());
     ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
 
-    OneOffDescriptorSet ds(m_device, {
-                                         {2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
-                                         {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
-                                         {1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
-                                     });
+    OneOffDescriptorSet descriptor_set(m_device,
+                                       {
+                                           {2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
+                                           {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
+                                           {1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
+                                       });
 
     // Create two buffers to update the descriptors with
     // The first will be 2k and used for bindings 0 & 1, the second is 1k for binding 2
@@ -2759,28 +2932,28 @@ TEST_F(VkPositiveLayerTest, DynamicOffsetWithInactiveBinding) {
     buffCI.queueFamilyIndexCount = 1;
     buffCI.pQueueFamilyIndices = &qfi;
 
-    VkBufferObj dyub1, dyub2;
-    dyub1.init(*m_device, buffCI);
+    VkBufferObj dynamic_uniform_buffer_1, dynamic_uniform_buffer_2;
+    dynamic_uniform_buffer_1.init(*m_device, buffCI);
     buffCI.size = 1024;
-    dyub2.init(*m_device, buffCI);
+    dynamic_uniform_buffer_2.init(*m_device, buffCI);
 
     // Update descriptors
     const uint32_t BINDING_COUNT = 3;
     VkDescriptorBufferInfo buff_info[BINDING_COUNT] = {};
-    buff_info[0].buffer = dyub1.handle();
+    buff_info[0].buffer = dynamic_uniform_buffer_1.handle();
     buff_info[0].offset = 0;
     buff_info[0].range = 256;
-    buff_info[1].buffer = dyub1.handle();
+    buff_info[1].buffer = dynamic_uniform_buffer_1.handle();
     buff_info[1].offset = 256;
     buff_info[1].range = 512;
-    buff_info[2].buffer = dyub2.handle();
+    buff_info[2].buffer = dynamic_uniform_buffer_2.handle();
     buff_info[2].offset = 0;
     buff_info[2].range = 512;
 
     VkWriteDescriptorSet descriptor_write;
     memset(&descriptor_write, 0, sizeof(descriptor_write));
     descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptor_write.dstSet = ds.set_;
+    descriptor_write.dstSet = descriptor_set.set_;
     descriptor_write.dstBinding = 0;
     descriptor_write.descriptorCount = BINDING_COUNT;
     descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
@@ -2808,7 +2981,7 @@ TEST_F(VkPositiveLayerTest, DynamicOffsetWithInactiveBinding) {
     pipe.InitInfo();
     pipe.InitState();
     pipe.shader_stages_ = {vs.GetStageCreateInfo(), fs.GetStageCreateInfo()};
-    pipe.pipeline_layout_ = VkPipelineLayoutObj(m_device, {&ds.layout_});
+    pipe.pipeline_layout_ = VkPipelineLayoutObj(m_device, {&descriptor_set.layout_});
     pipe.CreateGraphicsPipeline();
 
     vkCmdBindPipeline(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe.pipeline_);
@@ -2816,7 +2989,7 @@ TEST_F(VkPositiveLayerTest, DynamicOffsetWithInactiveBinding) {
     //   we used to have a bug in this case.
     uint32_t dyn_off[BINDING_COUNT] = {0, 1024, 256};
     vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe.pipeline_layout_.handle(), 0, 1,
-                            &ds.set_, BINDING_COUNT, dyn_off);
+                            &descriptor_set.set_, BINDING_COUNT, dyn_off);
     m_commandBuffer->Draw(1, 0, 0, 0);
     m_errorMonitor->VerifyNotFound();
 
@@ -3660,7 +3833,7 @@ TEST_F(VkPositiveLayerTest, QueryAndCopySecondaryCommandBuffers) {
 
         primary_buffer.begin();
         vkCmdExecuteCommands(primary_buffer.handle(), 1, &secondary_buffer.handle());
-        vkCmdCopyQueryPoolResults(primary_buffer.handle(), query_pool, 0, 1, buffer.handle(), 0, 0, 0);
+        vkCmdCopyQueryPoolResults(primary_buffer.handle(), query_pool, 0, 1, buffer.handle(), 0, 0, VK_QUERY_RESULT_WAIT_BIT);
         primary_buffer.end();
     }
 
@@ -3731,7 +3904,7 @@ TEST_F(VkPositiveLayerTest, QueryAndCopyMultipleCommandBuffers) {
 
         vkBeginCommandBuffer(command_buffer[1], &begin_info);
 
-        vkCmdCopyQueryPoolResults(command_buffer[1], query_pool, 0, 1, buffer.handle(), 0, 0, 0);
+        vkCmdCopyQueryPoolResults(command_buffer[1], query_pool, 0, 1, buffer.handle(), 0, 0, VK_QUERY_RESULT_WAIT_BIT);
 
         vkEndCommandBuffer(command_buffer[1]);
     }
@@ -6569,6 +6742,34 @@ TEST_F(VkPositiveLayerTest, BindMemory2) {
     m_errorMonitor->VerifyNotFound();
 }
 
+TEST_F(VkPositiveLayerTest, CreatePipelineWithCoreChecksDisabled) {
+    TEST_DESCRIPTION("Test CreatePipeline while the CoreChecks validation object is disabled");
+
+    // Enable KHR validation features extension
+    VkValidationFeatureDisableEXT disables[] = {VK_VALIDATION_FEATURE_DISABLE_CORE_CHECKS_EXT};
+    VkValidationFeaturesEXT features = {};
+    features.sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT;
+    features.disabledValidationFeatureCount = 1;
+    features.pDisabledValidationFeatures = disables;
+
+    VkCommandPoolCreateFlags pool_flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    ASSERT_NO_FATAL_FAILURE(Init(nullptr, nullptr, pool_flags, &features));
+    ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
+    VkShaderObj vs(m_device, bindStateVertShaderText, VK_SHADER_STAGE_VERTEX_BIT, this);
+    VkShaderObj fs(m_device, bindStateFragShaderText, VK_SHADER_STAGE_FRAGMENT_BIT, this);
+    VkPipelineInputAssemblyStateCreateInfo iasci{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO, nullptr, 0,
+                                                 VK_PRIMITIVE_TOPOLOGY_PATCH_LIST, VK_FALSE};
+
+    CreatePipelineHelper pipe(*this);
+    pipe.InitInfo();
+    pipe.gp_ci_.pInputAssemblyState = &iasci;
+    pipe.shader_stages_ = {vs.GetStageCreateInfo(), fs.GetStageCreateInfo()};
+    pipe.InitState();
+    m_errorMonitor->ExpectSuccess();
+    pipe.CreateGraphicsPipeline();
+    m_errorMonitor->VerifyNotFound();
+}
+
 TEST_F(VkPositiveLayerTest, CreatePipeineWithTessellationDomainOrigin) {
     TEST_DESCRIPTION(
         "Test CreatePipeline when VkPipelineTessellationStateCreateInfo.pNext include "
@@ -6700,18 +6901,39 @@ TEST_F(VkPositiveLayerTest, MultiplaneImageTests) {
     mp_extensions = mp_extensions && DeviceExtensionSupported(gpu(), nullptr, VK_KHR_MAINTENANCE1_EXTENSION_NAME);
     mp_extensions = mp_extensions && DeviceExtensionSupported(gpu(), nullptr, VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME);
     mp_extensions = mp_extensions && DeviceExtensionSupported(gpu(), nullptr, VK_KHR_BIND_MEMORY_2_EXTENSION_NAME);
-    mp_extensions = mp_extensions && DeviceExtensionSupported(gpu(), nullptr, VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME);
     if (mp_extensions) {
         m_device_extension_names.push_back(VK_KHR_MAINTENANCE1_EXTENSION_NAME);
         m_device_extension_names.push_back(VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME);
         m_device_extension_names.push_back(VK_KHR_BIND_MEMORY_2_EXTENSION_NAME);
-        m_device_extension_names.push_back(VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME);
     } else {
         printf("%s test requires KHR multiplane extensions, not available.  Skipping.\n", kSkipPrefix);
         return;
     }
     ASSERT_NO_FATAL_FAILURE(InitState(nullptr, nullptr, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT));
     ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
+
+    // Create aliased function pointers for 1.0 and 1.1 contexts
+
+    PFN_vkBindImageMemory2KHR vkBindImageMemory2Function = nullptr;
+    PFN_vkGetImageMemoryRequirements2KHR vkGetImageMemoryRequirements2Function = nullptr;
+    PFN_vkGetPhysicalDeviceMemoryProperties2KHR vkGetPhysicalDeviceMemoryProperties2Function = nullptr;
+
+    if (DeviceValidationVersion() >= VK_API_VERSION_1_1) {
+        vkBindImageMemory2Function = vkBindImageMemory2;
+        vkGetImageMemoryRequirements2Function = vkGetImageMemoryRequirements2;
+        vkGetPhysicalDeviceMemoryProperties2Function = vkGetPhysicalDeviceMemoryProperties2;
+    } else {
+        vkBindImageMemory2Function = (PFN_vkBindImageMemory2KHR)vkGetDeviceProcAddr(m_device->handle(), "vkBindImageMemory2KHR");
+        vkGetImageMemoryRequirements2Function =
+            (PFN_vkGetImageMemoryRequirements2KHR)vkGetDeviceProcAddr(m_device->handle(), "vkGetImageMemoryRequirements2KHR");
+        vkGetPhysicalDeviceMemoryProperties2Function = (PFN_vkGetPhysicalDeviceMemoryProperties2KHR)vkGetDeviceProcAddr(
+            m_device->handle(), "vkGetPhysicalDeviceMemoryProperties2KHR");
+    }
+
+    if (!vkBindImageMemory2Function || !vkGetImageMemoryRequirements2Function || !vkGetPhysicalDeviceMemoryProperties2Function) {
+        printf("%s Did not find required device extension support; test skipped.\n", kSkipPrefix);
+        return;
+    }
 
     VkImageCreateInfo ci = {};
     ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -6799,7 +7021,7 @@ TEST_F(VkPositiveLayerTest, MultiplaneImageTests) {
 
         // Allocate & bind memory
         VkPhysicalDeviceMemoryProperties2 phys_mem_props2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2};
-        vkGetPhysicalDeviceMemoryProperties2(gpu(), &phys_mem_props2);
+        vkGetPhysicalDeviceMemoryProperties2Function(gpu(), &phys_mem_props2);
         VkImagePlaneMemoryRequirementsInfo image_plane_req = {VK_STRUCTURE_TYPE_IMAGE_PLANE_MEMORY_REQUIREMENTS_INFO};
         VkImageMemoryRequirementsInfo2 mem_req_info2 = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2};
         mem_req_info2.pNext = &image_plane_req;
@@ -6812,7 +7034,7 @@ TEST_F(VkPositiveLayerTest, MultiplaneImageTests) {
 
         // Plane 0
         image_plane_req.planeAspect = VK_IMAGE_ASPECT_PLANE_0_BIT;
-        vkGetImageMemoryRequirements2(device(), &mem_req_info2, &mem_reqs2);
+        vkGetImageMemoryRequirements2Function(device(), &mem_req_info2, &mem_reqs2);
         uint32_t mem_type = 0;
         for (mem_type = 0; mem_type < phys_mem_props2.memoryProperties.memoryTypeCount; mem_type++) {
             if ((mem_reqs2.memoryRequirements.memoryTypeBits & (1 << mem_type)) &&
@@ -6826,12 +7048,12 @@ TEST_F(VkPositiveLayerTest, MultiplaneImageTests) {
 
         // Plane 1 & 2 use same memory type
         image_plane_req.planeAspect = VK_IMAGE_ASPECT_PLANE_1_BIT;
-        vkGetImageMemoryRequirements2(device(), &mem_req_info2, &mem_reqs2);
+        vkGetImageMemoryRequirements2Function(device(), &mem_req_info2, &mem_reqs2);
         alloc_info.allocationSize = mem_reqs2.memoryRequirements.size;
         ASSERT_VK_SUCCESS(vkAllocateMemory(device(), &alloc_info, NULL, &p1_mem));
 
         image_plane_req.planeAspect = VK_IMAGE_ASPECT_PLANE_2_BIT;
-        vkGetImageMemoryRequirements2(device(), &mem_req_info2, &mem_reqs2);
+        vkGetImageMemoryRequirements2Function(device(), &mem_req_info2, &mem_reqs2);
         alloc_info.allocationSize = mem_reqs2.memoryRequirements.size;
         ASSERT_VK_SUCCESS(vkAllocateMemory(device(), &alloc_info, NULL, &p2_mem));
 
@@ -6848,7 +7070,7 @@ TEST_F(VkPositiveLayerTest, MultiplaneImageTests) {
         bind_info[2].memory = p2_mem;
 
         m_errorMonitor->ExpectSuccess();
-        vkBindImageMemory2(device(), 3, bind_info);
+        vkBindImageMemory2Function(device(), 3, bind_info);
         m_errorMonitor->VerifyNotFound();
 
         vkFreeMemory(device(), p0_mem, NULL);
@@ -6896,9 +7118,10 @@ TEST_F(VkPositiveLayerTest, MultiplaneImageTests) {
     ivci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     vkCreateImageView(m_device->device(), &ivci, nullptr, &view);
 
-    OneOffDescriptorSet ds(m_device, {
-                                         {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
-                                     });
+    OneOffDescriptorSet descriptor_set(m_device,
+                                       {
+                                           {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
+                                       });
 
     VkSamplerCreateInfo sampler_ci = SafeSaneSamplerCreateInfo();
     VkSampler sampler;
@@ -6907,9 +7130,9 @@ TEST_F(VkPositiveLayerTest, MultiplaneImageTests) {
     err = vkCreateSampler(m_device->device(), &sampler_ci, NULL, &sampler);
     ASSERT_VK_SUCCESS(err);
 
-    const VkPipelineLayoutObj pipeline_layout(m_device, {&ds.layout_});
-    ds.WriteDescriptorImageView(0, view, sampler);
-    ds.UpdateDescriptorSets();
+    const VkPipelineLayoutObj pipeline_layout(m_device, {&descriptor_set.layout_});
+    descriptor_set.WriteDescriptorImageInfo(0, view, sampler);
+    descriptor_set.UpdateDescriptorSets();
 
     VkShaderObj vs(m_device, bindStateVertShaderText, VK_SHADER_STAGE_VERTEX_BIT, this);
     VkShaderObj fs(m_device, bindStateFragSamplerShaderText, VK_SHADER_STAGE_FRAGMENT_BIT, this);
@@ -6939,8 +7162,8 @@ TEST_F(VkPositiveLayerTest, MultiplaneImageTests) {
                          VK_DEPENDENCY_BY_REGION_BIT, 0, nullptr, 0, nullptr, 1, &img_barrier);
     m_commandBuffer->BeginRenderPass(m_renderPassBeginInfo);
     vkCmdBindPipeline(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe.handle());
-    vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout.handle(), 0, 1, &ds.set_, 0,
-                            nullptr);
+    vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout.handle(), 0, 1,
+                            &descriptor_set.set_, 0, nullptr);
 
     VkViewport viewport = {0, 0, 16, 16, 0, 1};
     VkRect2D scissor = {{0, 0}, {16, 16}};
@@ -7000,15 +7223,15 @@ TEST_F(VkPositiveLayerTest, ViewportArray2NV) {
     ASSERT_NO_FATAL_FAILURE(GetPhysicalDeviceFeatures(&available_features));
 
     if (!available_features.multiViewport) {
-        printf("VkPhysicalDeviceFeatures::multiViewport is not supported, skipping tests\n");
+        printf("%s VkPhysicalDeviceFeatures::multiViewport is not supported, skipping tests\n", kSkipPrefix);
         return;
     }
     if (!available_features.tessellationShader) {
-        printf("VkPhysicalDeviceFeatures::tessellationShader is not supported, skipping tests\n");
+        printf("%s VkPhysicalDeviceFeatures::tessellationShader is not supported, skipping tests\n", kSkipPrefix);
         return;
     }
     if (!available_features.geometryShader) {
-        printf("VkPhysicalDeviceFeatures::geometryShader is not supported, skipping tests\n");
+        printf("%s VkPhysicalDeviceFeatures::geometryShader is not supported, skipping tests\n", kSkipPrefix);
         return;
     }
 
@@ -7184,4 +7407,317 @@ TEST_F(VkPositiveLayerTest, HostQueryResetSuccess) {
     vkDestroyQueryPool(m_device->device(), query_pool, nullptr);
 
     m_errorMonitor->VerifyNotFound();
+}
+
+TEST_F(VkPositiveLayerTest, CreatePipelineFragmentOutputNotConsumedButAlphaToCoverageEnabled) {
+    TEST_DESCRIPTION(
+        "Test that no warning is produced when writing to non-existing color attachment if alpha to coverage is enabled.");
+
+    ASSERT_NO_FATAL_FAILURE(Init());
+    ASSERT_NO_FATAL_FAILURE(InitRenderTarget(0u));
+
+    VkPipelineMultisampleStateCreateInfo ms_state_ci = {};
+    ms_state_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    ms_state_ci.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    ms_state_ci.alphaToCoverageEnable = VK_TRUE;
+
+    const auto set_info = [&](CreatePipelineHelper &helper) {
+        helper.pipe_ms_state_ci_ = ms_state_ci;
+        helper.cb_ci_.attachmentCount = 0;
+    };
+    CreatePipelineHelper::OneshotTest(*this, set_info, VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT, "", true);
+}
+
+TEST_F(VkPositiveLayerTest, UseFirstQueueUnqueried) {
+    TEST_DESCRIPTION("Use first queue family and one queue without first querying with vkGetPhysicalDeviceQueueFamilyProperties");
+
+    ASSERT_NO_FATAL_FAILURE(InitFramework(myDbgFunc, m_errorMonitor));
+
+    const float q_priority[] = {1.0f};
+    VkDeviceQueueCreateInfo queue_ci = {};
+    queue_ci.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    queue_ci.queueFamilyIndex = 0;
+    queue_ci.queueCount = 1;
+    queue_ci.pQueuePriorities = q_priority;
+
+    VkDeviceCreateInfo device_ci = {};
+    device_ci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    device_ci.queueCreateInfoCount = 1;
+    device_ci.pQueueCreateInfos = &queue_ci;
+
+    m_errorMonitor->ExpectSuccess();
+    VkDevice test_device;
+    vkCreateDevice(gpu(), &device_ci, nullptr, &test_device);
+    m_errorMonitor->VerifyNotFound();
+
+    vkDestroyDevice(test_device, nullptr);
+}
+
+// Android loader returns an error in this case
+#if !defined(ANDROID)
+TEST_F(VkPositiveLayerTest, GetDevProcAddrNullPtr) {
+    TEST_DESCRIPTION("Call GetDeviceProcAddr on an enabled instance extension expecting nullptr");
+    ASSERT_NO_FATAL_FAILURE(InitFramework(myDbgFunc, m_errorMonitor));
+
+    if (InstanceExtensionSupported(VK_KHR_SURFACE_EXTENSION_NAME)) {
+        m_instance_extension_names.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+    } else {
+        printf("%s %s not supported, skipping test\n", kSkipPrefix, VK_KHR_SURFACE_EXTENSION_NAME);
+        return;
+    }
+    ASSERT_NO_FATAL_FAILURE(InitState());
+
+    m_errorMonitor->ExpectSuccess();
+    auto fpDestroySurface = (PFN_vkCreateValidationCacheEXT)vkGetDeviceProcAddr(m_device->device(), "vkDestroySurfaceKHR");
+    if (fpDestroySurface) {
+        m_errorMonitor->SetError("Null was expected!");
+    }
+    m_errorMonitor->VerifyNotFound();
+}
+#endif
+
+TEST_F(VkPositiveLayerTest, CmdCopySwapchainImage) {
+    TEST_DESCRIPTION("Run vkCmdCopyImage with a swapchain image");
+
+#if defined(VK_USE_PLATFORM_ANDROID_KHR)
+    printf(
+        "%s According to VUID-01631, VkBindImageMemoryInfo-memory should be NULL. But Android will crash if memory is NULL, "
+        "skipping CmdCopySwapchainImage test\n",
+        kSkipPrefix);
+    return;
+#endif
+
+    SetTargetApiVersion(VK_API_VERSION_1_1);
+
+    if (!AddSurfaceInstanceExtension()) {
+        printf("%s surface extensions not supported, skipping CmdCopySwapchainImage test\n", kSkipPrefix);
+        return;
+    }
+
+    ASSERT_NO_FATAL_FAILURE(InitFramework(myDbgFunc, m_errorMonitor));
+
+    if (!AddSwapchainDeviceExtension()) {
+        printf("%s swapchain extensions not supported, skipping CmdCopySwapchainImage test\n", kSkipPrefix);
+        return;
+    }
+
+    if (DeviceValidationVersion() < VK_API_VERSION_1_1) {
+        printf("%s VkBindImageMemoryInfo requires Vulkan 1.1+, skipping test\n", kSkipPrefix);
+        return;
+    }
+
+    ASSERT_NO_FATAL_FAILURE(InitState());
+    ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
+    if (!InitSwapchain()) {
+        printf("%s Cannot create surface or swapchain, skipping CmdCopySwapchainImage test\n", kSkipPrefix);
+        return;
+    }
+
+    auto image_create_info = lvl_init_struct<VkImageCreateInfo>();
+    image_create_info.imageType = VK_IMAGE_TYPE_2D;
+    image_create_info.format = VK_FORMAT_R8G8B8A8_UNORM;
+    image_create_info.extent.width = 64;
+    image_create_info.extent.height = 64;
+    image_create_info.extent.depth = 1;
+    image_create_info.mipLevels = 1;
+    image_create_info.arrayLayers = 1;
+    image_create_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_create_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_create_info.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
+    image_create_info.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    image_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VkImageObj srcImage(m_device);
+    srcImage.init(&image_create_info);
+
+    image_create_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+
+    auto image_swapchain_create_info = lvl_init_struct<VkImageSwapchainCreateInfoKHR>();
+    image_swapchain_create_info.swapchain = m_swapchain;
+    image_create_info.pNext = &image_swapchain_create_info;
+
+    VkImage image_from_swapchain;
+    vkCreateImage(device(), &image_create_info, NULL, &image_from_swapchain);
+
+    auto bind_swapchain_info = lvl_init_struct<VkBindImageMemorySwapchainInfoKHR>();
+    bind_swapchain_info.swapchain = m_swapchain;
+    bind_swapchain_info.imageIndex = 0;
+
+    auto bind_info = lvl_init_struct<VkBindImageMemoryInfo>(&bind_swapchain_info);
+    bind_info.image = image_from_swapchain;
+    bind_info.memory = VK_NULL_HANDLE;
+    bind_info.memoryOffset = 0;
+
+    vkBindImageMemory2(m_device->device(), 1, &bind_info);
+
+    VkImageCopy copy_region = {};
+    copy_region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy_region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy_region.srcSubresource.mipLevel = 0;
+    copy_region.dstSubresource.mipLevel = 0;
+    copy_region.srcSubresource.baseArrayLayer = 0;
+    copy_region.dstSubresource.baseArrayLayer = 0;
+    copy_region.srcSubresource.layerCount = 1;
+    copy_region.dstSubresource.layerCount = 1;
+    copy_region.srcOffset = {0, 0, 0};
+    copy_region.dstOffset = {0, 0, 0};
+    copy_region.extent = {10, 10, 1};
+
+    m_commandBuffer->begin();
+
+    m_errorMonitor->ExpectSuccess();
+    vkCmdCopyImage(m_commandBuffer->handle(), srcImage.handle(), VK_IMAGE_LAYOUT_GENERAL, image_from_swapchain,
+                   VK_IMAGE_LAYOUT_GENERAL, 1, &copy_region);
+    m_errorMonitor->VerifyNotFound();
+
+    vkDestroyImage(m_device->device(), image_from_swapchain, NULL);
+    DestroySwapchain();
+}
+
+TEST_F(VkPositiveLayerTest, TransferImageToSwapchainDeviceGroup) {
+    TEST_DESCRIPTION("Transfer an image to a swapchain's image  between device group");
+
+#if defined(VK_USE_PLATFORM_ANDROID_KHR)
+    printf(
+        "%s According to VUID-01631, VkBindImageMemoryInfo-memory should be NULL. But Android will crash if memory is NULL, "
+        "skipping test\n",
+        kSkipPrefix);
+    return;
+#endif
+
+    SetTargetApiVersion(VK_API_VERSION_1_1);
+
+    if (!AddSurfaceInstanceExtension()) {
+        printf("%s surface extensions not supported, skipping test\n", kSkipPrefix);
+        return;
+    }
+
+    ASSERT_NO_FATAL_FAILURE(InitFramework(myDbgFunc, m_errorMonitor));
+
+    if (!AddSwapchainDeviceExtension()) {
+        printf("%s swapchain extensions not supported, skipping test\n", kSkipPrefix);
+        return;
+    }
+
+    if (DeviceValidationVersion() < VK_API_VERSION_1_1) {
+        printf("%s VkBindImageMemoryInfo requires Vulkan 1.1+, skipping test\n", kSkipPrefix);
+        return;
+    }
+    uint32_t physical_device_group_count = 0;
+    vkEnumeratePhysicalDeviceGroups(instance(), &physical_device_group_count, nullptr);
+
+    if (physical_device_group_count == 0) {
+        printf("%s physical_device_group_count is 0, skipping test\n", kSkipPrefix);
+        return;
+    }
+
+    std::vector<VkPhysicalDeviceGroupProperties> physical_device_group(physical_device_group_count,
+                                                                       {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GROUP_PROPERTIES});
+    vkEnumeratePhysicalDeviceGroups(instance(), &physical_device_group_count, physical_device_group.data());
+    VkDeviceGroupDeviceCreateInfo create_device_pnext = {};
+    create_device_pnext.sType = VK_STRUCTURE_TYPE_DEVICE_GROUP_DEVICE_CREATE_INFO;
+    create_device_pnext.physicalDeviceCount = physical_device_group[0].physicalDeviceCount;
+    create_device_pnext.pPhysicalDevices = physical_device_group[0].physicalDevices;
+    ASSERT_NO_FATAL_FAILURE(InitState(nullptr, &create_device_pnext, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT));
+    ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
+    if (!InitSwapchain(VK_IMAGE_USAGE_TRANSFER_DST_BIT)) {
+        printf("%s Cannot create surface or swapchain, skipping test\n", kSkipPrefix);
+        return;
+    }
+
+    auto image_create_info = lvl_init_struct<VkImageCreateInfo>();
+    image_create_info.imageType = VK_IMAGE_TYPE_2D;
+    image_create_info.format = VK_FORMAT_R8G8B8A8_UNORM;
+    image_create_info.extent.width = 64;
+    image_create_info.extent.height = 64;
+    image_create_info.extent.depth = 1;
+    image_create_info.mipLevels = 1;
+    image_create_info.arrayLayers = 1;
+    image_create_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_create_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_create_info.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
+    image_create_info.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    image_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VkImageObj src_Image(m_device);
+    src_Image.init(&image_create_info);
+
+    image_create_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    image_create_info.flags = VK_IMAGE_CREATE_ALIAS_BIT;
+
+    auto image_swapchain_create_info = lvl_init_struct<VkImageSwapchainCreateInfoKHR>();
+    image_swapchain_create_info.swapchain = m_swapchain;
+    image_create_info.pNext = &image_swapchain_create_info;
+
+    VkImage peer_image;
+    vkCreateImage(device(), &image_create_info, NULL, &peer_image);
+
+    auto bind_devicegroup_info = lvl_init_struct<VkBindImageMemoryDeviceGroupInfo>();
+    bind_devicegroup_info.deviceIndexCount = 2;
+    std::array<uint32_t, 2> deviceIndices = {0, 0};
+    bind_devicegroup_info.pDeviceIndices = deviceIndices.data();
+    bind_devicegroup_info.splitInstanceBindRegionCount = 0;
+    bind_devicegroup_info.pSplitInstanceBindRegions = nullptr;
+
+    auto bind_swapchain_info = lvl_init_struct<VkBindImageMemorySwapchainInfoKHR>(&bind_devicegroup_info);
+    bind_swapchain_info.swapchain = m_swapchain;
+    bind_swapchain_info.imageIndex = 0;
+
+    auto bind_info = lvl_init_struct<VkBindImageMemoryInfo>(&bind_swapchain_info);
+    bind_info.image = peer_image;
+    bind_info.memory = VK_NULL_HANDLE;
+    bind_info.memoryOffset = 0;
+
+    vkBindImageMemory2(m_device->device(), 1, &bind_info);
+
+    uint32_t swapchain_images_count = 0;
+    vkGetSwapchainImagesKHR(device(), m_swapchain, &swapchain_images_count, nullptr);
+    std::vector<VkImage> swapchain_images;
+    swapchain_images.resize(swapchain_images_count);
+    vkGetSwapchainImagesKHR(device(), m_swapchain, &swapchain_images_count, swapchain_images.data());
+
+    m_commandBuffer->begin();
+
+    auto img_barrier = lvl_init_struct<VkImageMemoryBarrier>();
+    img_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    img_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    img_barrier.image = swapchain_images[0];
+    img_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    img_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    img_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    img_barrier.subresourceRange.baseArrayLayer = 0;
+    img_barrier.subresourceRange.baseMipLevel = 0;
+    img_barrier.subresourceRange.layerCount = 1;
+    img_barrier.subresourceRange.levelCount = 1;
+    vkCmdPipelineBarrier(m_commandBuffer->handle(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, 0,
+                         nullptr, 0, nullptr, 1, &img_barrier);
+
+    m_commandBuffer->end();
+    m_commandBuffer->QueueCommandBuffer();
+
+    m_commandBuffer->reset();
+    m_commandBuffer->begin();
+
+    VkImageCopy copy_region = {};
+    copy_region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy_region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy_region.srcSubresource.mipLevel = 0;
+    copy_region.dstSubresource.mipLevel = 0;
+    copy_region.srcSubresource.baseArrayLayer = 0;
+    copy_region.dstSubresource.baseArrayLayer = 0;
+    copy_region.srcSubresource.layerCount = 1;
+    copy_region.dstSubresource.layerCount = 1;
+    copy_region.srcOffset = {0, 0, 0};
+    copy_region.dstOffset = {0, 0, 0};
+    copy_region.extent = {10, 10, 1};
+    vkCmdCopyImage(m_commandBuffer->handle(), src_Image.handle(), VK_IMAGE_LAYOUT_GENERAL, peer_image,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
+
+    m_commandBuffer->end();
+    m_errorMonitor->ExpectSuccess();
+    m_commandBuffer->QueueCommandBuffer();
+    m_errorMonitor->VerifyNotFound();
+
+    vkDestroyImage(m_device->device(), peer_image, NULL);
+    DestroySwapchain();
 }
