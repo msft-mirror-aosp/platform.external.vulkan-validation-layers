@@ -38,6 +38,8 @@ VkRenderFramework::VkRenderFramework()
       m_commandBuffer(NULL),
       m_renderPass(VK_NULL_HANDLE),
       m_framebuffer(VK_NULL_HANDLE),
+      m_surface(VK_NULL_HANDLE),
+      m_swapchain(VK_NULL_HANDLE),
       m_addRenderPassSelfDependency(false),
       m_width(256.0),   // default window width
       m_height(256.0),  // default window height
@@ -61,7 +63,7 @@ VkRenderFramework::VkRenderFramework()
     m_clear_color.float32[3] = 0.0f;
 }
 
-VkRenderFramework::~VkRenderFramework() {}
+VkRenderFramework::~VkRenderFramework() { ShutdownFramework(); }
 
 VkPhysicalDevice VkRenderFramework::gpu() {
     EXPECT_NE((VkInstance)0, inst);  // Invalid to request gpu before instance exists
@@ -472,7 +474,7 @@ void VkRenderFramework::InitViewport(float width, float height) {
 
 void VkRenderFramework::InitViewport() { InitViewport(m_width, m_height); }
 
-void VkRenderFramework::InitSwapchain() { InitSwapchain(m_width, m_height); }
+bool VkRenderFramework::InitSurface() { return InitSurface(m_width, m_height); }
 
 #ifdef VK_USE_PLATFORM_WIN32_KHR
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
@@ -480,10 +482,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 }
 #endif  // VK_USE_PLATFORM_WIN32_KHR
 
-void VkRenderFramework::InitSwapchain(float width, float height) {
-    VkResult err = VK_SUCCESS;
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR
+bool VkRenderFramework::InitSurface(float width, float height) {
+#if defined(VK_USE_PLATFORM_WIN32_KHR)
     HINSTANCE window_instance = GetModuleHandle(nullptr);
     const char class_name[] = "test";
     WNDCLASS wc = {};
@@ -498,67 +498,96 @@ void VkRenderFramework::InitSwapchain(float width, float height) {
     surface_create_info.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
     surface_create_info.hinstance = window_instance;
     surface_create_info.hwnd = window;
-    err = vkCreateWin32SurfaceKHR(instance(), &surface_create_info, nullptr, &m_surface);
-    ASSERT_VK_SUCCESS(err);
+    VkResult err = vkCreateWin32SurfaceKHR(instance(), &surface_create_info, nullptr, &m_surface);
+    if (err != VK_SUCCESS) return false;
+#endif
 
-#elif VK_USE_PLATFORM_XLIB_KHR
-    Display *d = XOpenDisplay(NULL);
-    int s = DefaultScreen(d);
-    Window w = XCreateSimpleWindow(d, RootWindow(d, s), 0, 0, (int)m_width, (int)m_height, 1, BlackPixel(d, s), WhitePixel(d, s));
-    VkXlibSurfaceCreateInfoKHR surface_create_info = {};
-    surface_create_info.sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR;
-    surface_create_info.dpy = d;
-    surface_create_info.window = w;
-    err = vkCreateXlibSurfaceKHR(instance(), &surface_create_info, nullptr, &m_surface);
-    ASSERT_VK_SUCCESS(err);
-
-#elif defined(VK_USE_PLATFORM_ANDROID_KHR) && defined(VALIDATION_APK)
+#if defined(VK_USE_PLATFORM_ANDROID_KHR) && defined(VALIDATION_APK)
     VkAndroidSurfaceCreateInfoKHR surface_create_info = {};
     surface_create_info.sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR;
     surface_create_info.window = VkTestFramework::window;
-    err = vkCreateAndroidSurfaceKHR(instance(), &surface_create_info, nullptr, &m_surface);
-    ASSERT_VK_SUCCESS(err);
-
-#else
-    return;
+    VkResult err = vkCreateAndroidSurfaceKHR(instance(), &surface_create_info, nullptr, &m_surface);
+    if (err != VK_SUCCESS) return false;
 #endif
 
+#if defined(VK_USE_PLATFORM_XLIB_KHR)
+    Display *dpy = XOpenDisplay(NULL);
+    if (dpy) {
+        int s = DefaultScreen(dpy);
+        Window window = XCreateSimpleWindow(dpy, RootWindow(dpy, s), 0, 0, (int)m_width, (int)m_height, 1, BlackPixel(dpy, s),
+                                            WhitePixel(dpy, s));
+        VkXlibSurfaceCreateInfoKHR surface_create_info = {};
+        surface_create_info.sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR;
+        surface_create_info.dpy = dpy;
+        surface_create_info.window = window;
+        VkResult err = vkCreateXlibSurfaceKHR(instance(), &surface_create_info, nullptr, &m_surface);
+        if (err != VK_SUCCESS) return false;
+    }
+#endif
+
+#if defined(VK_USE_PLATFORM_XCB_KHR)
+    if (m_surface == VK_NULL_HANDLE) {
+        xcb_connection_t *connection = xcb_connect(NULL, NULL);
+        if (connection) {
+            xcb_window_t window = xcb_generate_id(connection);
+            VkXcbSurfaceCreateInfoKHR surface_create_info = {};
+            surface_create_info.sType = VK_STRUCTURE_TYPE_XCB_SURFACE_CREATE_INFO_KHR;
+            surface_create_info.connection = connection;
+            surface_create_info.window = window;
+            VkResult err = vkCreateXcbSurfaceKHR(instance(), &surface_create_info, nullptr, &m_surface);
+            if (err != VK_SUCCESS) return false;
+        }
+    }
+#endif
+
+    return (m_surface == VK_NULL_HANDLE) ? false : true;
+}
+
+bool VkRenderFramework::InitSwapchain(VkImageUsageFlags imageUsage, VkSurfaceTransformFlagBitsKHR preTransform) {
+    if (InitSurface()) {
+        return InitSwapchain(m_surface, imageUsage, preTransform);
+    }
+    return false;
+}
+
+bool VkRenderFramework::InitSwapchain(VkSurfaceKHR &surface, VkImageUsageFlags imageUsage,
+                                      VkSurfaceTransformFlagBitsKHR preTransform) {
     for (size_t i = 0; i < m_device->queue_props.size(); ++i) {
         VkBool32 presentSupport = false;
-        vkGetPhysicalDeviceSurfaceSupportKHR(m_device->phy().handle(), i, m_surface, &presentSupport);
+        vkGetPhysicalDeviceSurfaceSupportKHR(m_device->phy().handle(), i, surface, &presentSupport);
     }
 
     VkSurfaceCapabilitiesKHR capabilities;
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(m_device->phy().handle(), m_surface, &capabilities);
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(m_device->phy().handle(), surface, &capabilities);
 
     uint32_t format_count;
-    vkGetPhysicalDeviceSurfaceFormatsKHR(m_device->phy().handle(), m_surface, &format_count, nullptr);
+    vkGetPhysicalDeviceSurfaceFormatsKHR(m_device->phy().handle(), surface, &format_count, nullptr);
     std::vector<VkSurfaceFormatKHR> formats;
     if (format_count != 0) {
         formats.resize(format_count);
-        vkGetPhysicalDeviceSurfaceFormatsKHR(m_device->phy().handle(), m_surface, &format_count, formats.data());
+        vkGetPhysicalDeviceSurfaceFormatsKHR(m_device->phy().handle(), surface, &format_count, formats.data());
     }
 
     uint32_t present_mode_count;
-    vkGetPhysicalDeviceSurfacePresentModesKHR(m_device->phy().handle(), m_surface, &present_mode_count, nullptr);
+    vkGetPhysicalDeviceSurfacePresentModesKHR(m_device->phy().handle(), surface, &present_mode_count, nullptr);
     std::vector<VkPresentModeKHR> present_modes;
     if (present_mode_count != 0) {
         present_modes.resize(present_mode_count);
-        vkGetPhysicalDeviceSurfacePresentModesKHR(m_device->phy().handle(), m_surface, &present_mode_count, present_modes.data());
+        vkGetPhysicalDeviceSurfacePresentModesKHR(m_device->phy().handle(), surface, &present_mode_count, present_modes.data());
     }
 
     VkSwapchainCreateInfoKHR swapchain_create_info = {};
     swapchain_create_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     swapchain_create_info.pNext = 0;
-    swapchain_create_info.surface = m_surface;
+    swapchain_create_info.surface = surface;
     swapchain_create_info.minImageCount = capabilities.minImageCount;
     swapchain_create_info.imageFormat = formats[0].format;
     swapchain_create_info.imageColorSpace = formats[0].colorSpace;
     swapchain_create_info.imageExtent = {capabilities.minImageExtent.width, capabilities.minImageExtent.height};
     swapchain_create_info.imageArrayLayers = capabilities.maxImageArrayLayers;
-    swapchain_create_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    swapchain_create_info.imageUsage = imageUsage;
     swapchain_create_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    swapchain_create_info.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+    swapchain_create_info.preTransform = preTransform;
 #ifdef VK_USE_PLATFORM_ANDROID_KHR
     swapchain_create_info.compositeAlpha = VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
 #else
@@ -567,15 +596,28 @@ void VkRenderFramework::InitSwapchain(float width, float height) {
     swapchain_create_info.presentMode = present_modes[0];
     swapchain_create_info.clipped = VK_FALSE;
     swapchain_create_info.oldSwapchain = 0;
-    err = vkCreateSwapchainKHR(device(), &swapchain_create_info, nullptr, &m_swapchain);
-    ASSERT_VK_SUCCESS(err);
+
+    VkResult err = vkCreateSwapchainKHR(device(), &swapchain_create_info, nullptr, &m_swapchain);
+    if (err != VK_SUCCESS) {
+        return false;
+    }
+    uint32_t imageCount = 0;
+    vkGetSwapchainImagesKHR(device(), m_swapchain, &imageCount, nullptr);
+    std::vector<VkImage> swapchainImages;
+    swapchainImages.resize(imageCount);
+    vkGetSwapchainImagesKHR(device(), m_swapchain, &imageCount, swapchainImages.data());
+    return true;
 }
 
 void VkRenderFramework::DestroySwapchain() {
-    vkDestroySwapchainKHR(device(), m_swapchain, nullptr);
-    m_swapchain = VK_NULL_HANDLE;
-    vkDestroySurfaceKHR(instance(), m_surface, nullptr);
-    m_surface = VK_NULL_HANDLE;
+    if (m_swapchain != VK_NULL_HANDLE) {
+        vkDestroySwapchainKHR(device(), m_swapchain, nullptr);
+        m_swapchain = VK_NULL_HANDLE;
+    }
+    if (m_surface != VK_NULL_HANDLE) {
+        vkDestroySurfaceKHR(instance(), m_surface, nullptr);
+        m_surface = VK_NULL_HANDLE;
+    }
 }
 
 void VkRenderFramework::InitRenderTarget() { InitRenderTarget(1); }
@@ -1464,7 +1506,7 @@ VkConstantBufferObj::VkConstantBufferObj(VkDeviceObj *device, VkDeviceSize alloc
 VkPipelineShaderStageCreateInfo const &VkShaderObj::GetStageCreateInfo() const { return m_stage_info; }
 
 VkShaderObj::VkShaderObj(VkDeviceObj *device, const char *shader_code, VkShaderStageFlagBits stage, VkRenderFramework *framework,
-                         char const *name, bool debug) {
+                         char const *name, bool debug, VkSpecializationInfo *specInfo) {
     VkResult U_ASSERT_ONLY err = VK_SUCCESS;
     std::vector<unsigned int> spv;
     VkShaderModuleCreateInfo moduleCreateInfo;
@@ -1476,7 +1518,7 @@ VkShaderObj::VkShaderObj(VkDeviceObj *device, const char *shader_code, VkShaderS
     m_stage_info.stage = stage;
     m_stage_info.module = VK_NULL_HANDLE;
     m_stage_info.pName = name;
-    m_stage_info.pSpecializationInfo = nullptr;
+    m_stage_info.pSpecializationInfo = specInfo;
 
     moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     moduleCreateInfo.pNext = nullptr;
@@ -1492,7 +1534,7 @@ VkShaderObj::VkShaderObj(VkDeviceObj *device, const char *shader_code, VkShaderS
 }
 
 VkShaderObj::VkShaderObj(VkDeviceObj *device, const std::string spv_source, VkShaderStageFlagBits stage,
-                         VkRenderFramework *framework, char const *name) {
+                         VkRenderFramework *framework, char const *name, VkSpecializationInfo *specInfo) {
     VkResult U_ASSERT_ONLY err = VK_SUCCESS;
     std::vector<unsigned int> spv;
     VkShaderModuleCreateInfo moduleCreateInfo;
@@ -1504,7 +1546,7 @@ VkShaderObj::VkShaderObj(VkDeviceObj *device, const std::string spv_source, VkSh
     m_stage_info.stage = stage;
     m_stage_info.module = VK_NULL_HANDLE;
     m_stage_info.pName = name;
-    m_stage_info.pSpecializationInfo = nullptr;
+    m_stage_info.pSpecializationInfo = specInfo;
 
     moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     moduleCreateInfo.pNext = nullptr;
