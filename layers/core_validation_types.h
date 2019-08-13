@@ -64,6 +64,7 @@ class DescriptorSet;
 
 struct CMD_BUFFER_STATE;
 class CoreChecks;
+class ValidationStateTracker;
 
 enum CALL_STATE {
     UNCALLED,       // Function has not been called
@@ -301,6 +302,9 @@ class IMAGE_STATE : public BINDABLE {
     bool has_ahb_format;                 // True if image was created with an external Android format
     uint64_t ahb_format;                 // External Android format, if provided
     VkImageSubresourceRange full_range;  // The normalized ISR for all levels, layers (slices), and aspects
+    VkSwapchainKHR create_from_swapchain;
+    VkSwapchainKHR bind_swapchain;
+    uint32_t bind_swapchain_imageIndex;
 
 #ifdef VK_USE_PLATFORM_ANDROID_KHR
     uint64_t external_format_android;
@@ -326,6 +330,27 @@ class IMAGE_VIEW_STATE : public BASE_NODE {
     VkSamplerYcbcrConversion samplerConversion;  // Handle of the ycbcr sampler conversion the image was created with, if any
     IMAGE_VIEW_STATE(const IMAGE_STATE *image_state, VkImageView iv, const VkImageViewCreateInfo *ci);
     IMAGE_VIEW_STATE(const IMAGE_VIEW_STATE &rh_obj) = delete;
+};
+
+class ACCELERATION_STRUCTURE_STATE : public BINDABLE {
+   public:
+    VkAccelerationStructureNV acceleration_structure;
+    safe_VkAccelerationStructureCreateInfoNV create_info;
+    bool memory_requirements_checked = false;
+    VkMemoryRequirements2KHR memory_requirements;
+    bool build_scratch_memory_requirements_checked = false;
+    VkMemoryRequirements2KHR build_scratch_memory_requirements;
+    bool update_scratch_memory_requirements_checked = false;
+    VkMemoryRequirements2KHR update_scratch_memory_requirements;
+    bool built = false;
+    safe_VkAccelerationStructureInfoNV build_info;
+    ACCELERATION_STRUCTURE_STATE(VkAccelerationStructureNV as, const VkAccelerationStructureCreateInfoNV *ci)
+        : acceleration_structure(as),
+          create_info(ci),
+          memory_requirements{},
+          build_scratch_memory_requirements_checked{},
+          update_scratch_memory_requirements_checked{} {}
+    ACCELERATION_STRUCTURE_STATE(const ACCELERATION_STRUCTURE_STATE &rh_obj) = delete;
 };
 
 struct MemRange {
@@ -365,9 +390,10 @@ struct DEVICE_MEMORY_STATE : public BASE_NODE {
     VkExternalMemoryHandleTypeFlags export_handle_type_flags;
     std::unordered_set<VulkanTypedHandle> obj_bindings;       // objects bound to this memory
     std::unordered_map<uint64_t, MEMORY_RANGE> bound_ranges;  // Map of object to its binding range
-    // Convenience vectors image/buff handles to speed up iterating over images or buffers independently
+    // Convenience vectors of handles to speed up iterating over objects independently
     std::unordered_set<uint64_t> bound_images;
     std::unordered_set<uint64_t> bound_buffers;
+    std::unordered_set<uint64_t> bound_acceleration_structures;
 
     MemRange mem_range;
     void *shadow_copy_base;    // Base of layer's allocation for guard band, data, and alignment space
@@ -750,6 +776,7 @@ class ImageSubresourceLayoutMapImpl : public ImageSubresourceLayoutMap {
         bool updated = false;
         updated |= layouts_.initial.Merge(from.layouts_.initial);
         updated |= layouts_.current.Merge(from.layouts_.current);
+        initial_layout_state_map_.Merge(from.initial_layout_state_map_);
 
         return updated;
     }
@@ -972,7 +999,42 @@ struct QueryObject {
     bool indexed;
     QueryObject(VkQueryPool pool_, uint32_t query_) : pool(pool_), query(query_), index(0), indexed(false) {}
     QueryObject(VkQueryPool pool_, uint32_t query_, uint32_t index_) : pool(pool_), query(query_), index(index_), indexed(true) {}
+    bool operator<(const QueryObject &rhs) const { return (pool == rhs.pool) ? query < rhs.query : pool < rhs.pool; }
 };
+
+enum QueryState {
+    QUERYSTATE_UNKNOWN,    // Initial state.
+    QUERYSTATE_RESET,      // After resetting.
+    QUERYSTATE_RUNNING,    // Query running.
+    QUERYSTATE_AVAILABLE,  // Results available.
+};
+
+enum QueryResultType {
+    QUERYRESULT_UNKNOWN,
+    QUERYRESULT_NO_DATA,
+    QUERYRESULT_MAYBE_NO_DATA,
+    QUERYRESULT_SOME_DATA,
+    QUERYRESULT_WAIT_ON_RESET,
+    QUERYRESULT_WAIT_ON_RUNNING,
+};
+
+inline const char *string_QueryResultType(QueryResultType result_type) {
+    switch (result_type) {
+        case QUERYRESULT_UNKNOWN:
+            return "query may be in an unknown state";
+        case QUERYRESULT_NO_DATA:
+        case QUERYRESULT_MAYBE_NO_DATA:
+            return "query may return no data";
+        case QUERYRESULT_SOME_DATA:
+            return "query will return some data or availability bit";
+        case QUERYRESULT_WAIT_ON_RESET:
+            return "waiting on a query that has been reset and not issued yet";
+        case QUERYRESULT_WAIT_ON_RUNNING:
+            return "waiting on a query that has not ended yet";
+    }
+    assert(false);
+    return "UNKNOWN QUERY STATE";  // Unreachable.
+}
 
 inline bool operator==(const QueryObject &query1, const QueryObject &query2) {
     return ((query1.pool == query2.pool) && (query1.query == query2.query));
@@ -1079,8 +1141,26 @@ static inline bool CompatForSet(uint32_t set, const PIPELINE_LAYOUT_STATE *a, co
     return result;
 }
 
+// Shader typedefs needed to store StageStage below
+struct interface_var {
+    uint32_t id;
+    uint32_t type_id;
+    uint32_t offset;
+    bool is_patch;
+    bool is_block_member;
+    bool is_relaxed_precision;
+    // TODO: collect the name, too? Isn't required to be present.
+};
+typedef std::pair<unsigned, unsigned> descriptor_slot_t;
+
 class PIPELINE_STATE : public BASE_NODE {
    public:
+    struct StageState {
+        std::unordered_set<uint32_t> accessible_ids;
+        std::vector<std::pair<descriptor_slot_t, interface_var>> descriptor_uses;
+        bool has_writable_descriptor;
+    };
+
     VkPipeline pipeline;
     safe_VkGraphicsPipelineCreateInfo graphicsPipelineCI;
     safe_VkComputePipelineCreateInfo computePipelineCI;
@@ -1092,6 +1172,8 @@ class PIPELINE_STATE : public BASE_NODE {
     uint32_t duplicate_shaders;
     // Capture which slots (set#->bindings) are actually used by the shaders of this pipeline
     std::unordered_map<uint32_t, std::map<uint32_t, descriptor_req>> active_slots;
+    // Additional metadata needed by pipeline_state initialization and validation
+    std::vector<StageState> stage_state;
     // Vtx input info (if any)
     std::vector<VkVertexInputBindingDescription> vertex_binding_descriptions_;
     std::vector<VkVertexInputAttributeDescription> vertex_attribute_descriptions_;
@@ -1126,104 +1208,15 @@ class PIPELINE_STATE : public BASE_NODE {
         computePipelineCI.initialize(&emptyComputeCI);
         VkRayTracingPipelineCreateInfoNV emptyRayTracingCI = {};
         raytracingPipelineCI.initialize(&emptyRayTracingCI);
+        stage_state.clear();
     }
 
-    void initGraphicsPipeline(const VkGraphicsPipelineCreateInfo *pCreateInfo, std::shared_ptr<RENDER_PASS_STATE> &&rpstate) {
-        reset();
-        bool uses_color_attachment = false;
-        bool uses_depthstencil_attachment = false;
-        if (pCreateInfo->subpass < rpstate->createInfo.subpassCount) {
-            const auto &subpass = rpstate->createInfo.pSubpasses[pCreateInfo->subpass];
+    void initGraphicsPipeline(ValidationStateTracker *state_data, const VkGraphicsPipelineCreateInfo *pCreateInfo,
+                              std::shared_ptr<RENDER_PASS_STATE> &&rpstate);
+    void initComputePipeline(ValidationStateTracker *state_data, const VkComputePipelineCreateInfo *pCreateInfo);
+    void initRayTracingPipelineNV(ValidationStateTracker *state_data, const VkRayTracingPipelineCreateInfoNV *pCreateInfo);
 
-            for (uint32_t i = 0; i < subpass.colorAttachmentCount; ++i) {
-                if (subpass.pColorAttachments[i].attachment != VK_ATTACHMENT_UNUSED) {
-                    uses_color_attachment = true;
-                    break;
-                }
-            }
-
-            if (subpass.pDepthStencilAttachment && subpass.pDepthStencilAttachment->attachment != VK_ATTACHMENT_UNUSED) {
-                uses_depthstencil_attachment = true;
-            }
-        }
-        graphicsPipelineCI.initialize(pCreateInfo, uses_color_attachment, uses_depthstencil_attachment);
-        for (uint32_t i = 0; i < pCreateInfo->stageCount; i++) {
-            const VkPipelineShaderStageCreateInfo *pPSSCI = &pCreateInfo->pStages[i];
-            this->duplicate_shaders |= this->active_shaders & pPSSCI->stage;
-            this->active_shaders |= pPSSCI->stage;
-        }
-        if (graphicsPipelineCI.pVertexInputState) {
-            const auto pVICI = graphicsPipelineCI.pVertexInputState;
-            if (pVICI->vertexBindingDescriptionCount) {
-                this->vertex_binding_descriptions_ = std::vector<VkVertexInputBindingDescription>(
-                    pVICI->pVertexBindingDescriptions, pVICI->pVertexBindingDescriptions + pVICI->vertexBindingDescriptionCount);
-
-                this->vertex_binding_to_index_map_.reserve(pVICI->vertexBindingDescriptionCount);
-                for (uint32_t i = 0; i < pVICI->vertexBindingDescriptionCount; ++i) {
-                    this->vertex_binding_to_index_map_[pVICI->pVertexBindingDescriptions[i].binding] = i;
-                }
-            }
-            if (pVICI->vertexAttributeDescriptionCount) {
-                this->vertex_attribute_descriptions_ = std::vector<VkVertexInputAttributeDescription>(
-                    pVICI->pVertexAttributeDescriptions,
-                    pVICI->pVertexAttributeDescriptions + pVICI->vertexAttributeDescriptionCount);
-            }
-        }
-        if (graphicsPipelineCI.pColorBlendState) {
-            const auto pCBCI = graphicsPipelineCI.pColorBlendState;
-            if (pCBCI->attachmentCount) {
-                this->attachments = std::vector<VkPipelineColorBlendAttachmentState>(pCBCI->pAttachments,
-                                                                                     pCBCI->pAttachments + pCBCI->attachmentCount);
-            }
-        }
-        if (graphicsPipelineCI.pInputAssemblyState) {
-            topology_at_rasterizer = graphicsPipelineCI.pInputAssemblyState->topology;
-        }
-        rp_state = rpstate;
-    }
-
-    void initComputePipeline(const VkComputePipelineCreateInfo *pCreateInfo) {
-        reset();
-        computePipelineCI.initialize(pCreateInfo);
-        switch (computePipelineCI.stage.stage) {
-            case VK_SHADER_STAGE_COMPUTE_BIT:
-                this->active_shaders |= VK_SHADER_STAGE_COMPUTE_BIT;
-                break;
-            default:
-                // TODO : Flag error
-                break;
-        }
-    }
-
-    void initRayTracingPipelineNV(const VkRayTracingPipelineCreateInfoNV *pCreateInfo) {
-        reset();
-        raytracingPipelineCI.initialize(pCreateInfo);
-        switch (raytracingPipelineCI.pStages->stage) {
-            case VK_SHADER_STAGE_RAYGEN_BIT_NV:
-                this->active_shaders |= VK_SHADER_STAGE_RAYGEN_BIT_NV;
-                break;
-            case VK_SHADER_STAGE_ANY_HIT_BIT_NV:
-                this->active_shaders |= VK_SHADER_STAGE_ANY_HIT_BIT_NV;
-                break;
-            case VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV:
-                this->active_shaders |= VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV;
-                break;
-            case VK_SHADER_STAGE_MISS_BIT_NV:
-                this->active_shaders = VK_SHADER_STAGE_MISS_BIT_NV;
-                break;
-            case VK_SHADER_STAGE_INTERSECTION_BIT_NV:
-                this->active_shaders = VK_SHADER_STAGE_INTERSECTION_BIT_NV;
-                break;
-            case VK_SHADER_STAGE_CALLABLE_BIT_NV:
-                this->active_shaders |= VK_SHADER_STAGE_CALLABLE_BIT_NV;
-                break;
-            default:
-                // TODO : Flag error
-                break;
-        }
-    }
-
-    inline VkPipelineBindPoint getPipelineType() {
+    inline VkPipelineBindPoint getPipelineType() const {
         if (graphicsPipelineCI.sType == VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO)
             return VK_PIPELINE_BIND_POINT_GRAPHICS;
         else if (computePipelineCI.sType == VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO)
@@ -1440,8 +1433,7 @@ struct CMD_BUFFER_STATE : public BASE_NODE {
     std::unordered_set<VkEvent> waitedEvents;
     std::vector<VkEvent> writeEventsBeforeWait;
     std::vector<VkEvent> events;
-    std::unordered_map<QueryObject, std::unordered_set<VkEvent>> waitedEventsBeforeQueryReset;
-    std::unordered_map<QueryObject, bool> queryToStateMap;  // 0 is unavailable, 1 is available
+    std::map<QueryObject, QueryState> queryToStateMap;
     std::unordered_set<QueryObject> activeQueries;
     std::unordered_set<QueryObject> startedQueries;
     typedef std::unordered_map<VkImage, std::unique_ptr<ImageSubresourceLayoutMap>> ImageLayoutMap;
@@ -1537,11 +1529,16 @@ struct DeviceFeatures {
     VkPhysicalDeviceTransformFeedbackFeaturesEXT transform_feedback_features;
     VkPhysicalDeviceFloat16Int8FeaturesKHR float16_int8;
     VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT vtx_attrib_divisor_features;
+    VkPhysicalDeviceUniformBufferStandardLayoutFeaturesKHR uniform_buffer_standard_layout;
     VkPhysicalDeviceScalarBlockLayoutFeaturesEXT scalar_block_layout_features;
     VkPhysicalDeviceBufferAddressFeaturesEXT buffer_address;
     VkPhysicalDeviceCooperativeMatrixFeaturesNV cooperative_matrix_features;
     VkPhysicalDeviceFloatControlsPropertiesKHR float_controls;
     VkPhysicalDeviceHostQueryResetFeaturesEXT host_query_reset_features;
+    VkPhysicalDeviceComputeShaderDerivativesFeaturesNV compute_shader_derivatives_features;
+    VkPhysicalDeviceFragmentShaderBarycentricFeaturesNV fragment_shader_barycentric_features;
+    VkPhysicalDeviceShaderImageFootprintFeaturesNV shader_image_footprint_features;
+    VkPhysicalDeviceFragmentShaderInterlockFeaturesEXT fragment_shader_interlock_features;
 };
 
 enum RenderPassCreateVersion { RENDER_PASS_VERSION_1 = 0, RENDER_PASS_VERSION_2 = 1 };
@@ -1558,7 +1555,8 @@ enum BarrierOperationsType {
     kGeneral,     // Either no ownership operations or a mix of ownership operation types and/or non-ownership operations
 };
 
-std::shared_ptr<cvdescriptorset::DescriptorSetLayout const> const GetDescriptorSetLayout(CoreChecks const *, VkDescriptorSetLayout);
+std::shared_ptr<cvdescriptorset::DescriptorSetLayout const> const GetDescriptorSetLayout(const ValidationStateTracker *,
+                                                                                         VkDescriptorSetLayout);
 
 ImageSubresourceLayoutMap *GetImageSubresourceLayoutMap(CMD_BUFFER_STATE *cb_state, const IMAGE_STATE &image_state);
 const ImageSubresourceLayoutMap *GetImageSubresourceLayoutMap(const CMD_BUFFER_STATE *cb_state, VkImage image);

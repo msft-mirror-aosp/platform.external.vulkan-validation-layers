@@ -150,6 +150,14 @@ static const char bindStateFragSamplerShaderText[] =
     "   x = texture(s, vec2(1));\n"
     "}\n";
 
+static const char bindStateFragUniformShaderText[] =
+    "#version 450\n"
+    "layout(set=0) layout(binding=0) uniform foo { int x; int y; } bar;\n"
+    "layout(location=0) out vec4 x;\n"
+    "void main(){\n"
+    "   x = vec4(bar.y);\n"
+    "}\n";
+
 // Static arrays helper
 template <class ElementT, size_t array_size>
 size_t size(ElementT (&)[array_size]) {
@@ -292,6 +300,8 @@ class VkLayerTest : public VkRenderFramework {
 
     void Init(VkPhysicalDeviceFeatures *features = nullptr, VkPhysicalDeviceFeatures2 *features2 = nullptr,
               const VkCommandPoolCreateFlags flags = 0, void *instance_pnext = nullptr);
+    bool AddSurfaceInstanceExtension();
+    bool AddSwapchainDeviceExtension();
     ErrorMonitor *Monitor();
     VkCommandBufferObj *CommandBuffer();
 
@@ -300,14 +310,15 @@ class VkLayerTest : public VkRenderFramework {
     uint32_t m_instance_api_version = 0;
     uint32_t m_target_api_version = 0;
     bool m_enableWSI;
-    virtual void SetUp();
+
     uint32_t SetTargetApiVersion(uint32_t target_api_version);
     uint32_t DeviceValidationVersion();
     bool LoadDeviceProfileLayer(
         PFN_vkSetPhysicalDeviceFormatPropertiesEXT &fpvkSetPhysicalDeviceFormatPropertiesEXT,
         PFN_vkGetOriginalPhysicalDeviceFormatPropertiesEXT &fpvkGetOriginalPhysicalDeviceFormatPropertiesEXT);
-    virtual void TearDown();
+
     VkLayerTest();
+    ~VkLayerTest();
 };
 
 class VkPositiveLayerTest : public VkLayerTest {
@@ -392,11 +403,11 @@ struct OneOffDescriptorSet {
                         void *layout_pnext = NULL, VkDescriptorPoolCreateFlags poolFlags = 0, void *allocate_pnext = NULL);
     ~OneOffDescriptorSet();
     bool Initialized();
-    void WriteDescriptorBuffer(int blinding, VkBuffer buffer, VkDeviceSize size,
-                               VkDescriptorType descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    void WriteDescriptorBufferInfo(int blinding, VkBuffer buffer, VkDeviceSize size,
+                                   VkDescriptorType descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
     void WriteDescriptorBufferView(int blinding, VkBufferView &buffer_view,
                                    VkDescriptorType descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER);
-    void WriteDescriptorImageView(int blinding, VkImageView image_view, VkSampler sampler,
+    void WriteDescriptorImageInfo(int blinding, VkImageView image_view, VkSampler sampler,
                                   VkDescriptorType descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
     void UpdateDescriptorSets();
 };
@@ -653,6 +664,9 @@ class ExtensionChain {
 // PushDescriptorProperties helper
 VkPhysicalDevicePushDescriptorPropertiesKHR GetPushDescriptorProperties(VkInstance instance, VkPhysicalDevice gpu);
 
+// Subgroup properties helper
+VkPhysicalDeviceSubgroupProperties GetSubgroupProperties(VkInstance instance, VkPhysicalDevice gpu);
+
 class BarrierQueueFamilyTestHelper {
    public:
     struct QueueFamilyObjs {
@@ -724,7 +738,8 @@ extern "C" void *ReleaseNullFence(void *arg);
 
 void TestRenderPassCreate(ErrorMonitor *error_monitor, const VkDevice device, const VkRenderPassCreateInfo *create_info,
                           bool rp2Supported, const char *rp1_vuid, const char *rp2_vuid);
-
+void TestRenderPass2KHRCreate(ErrorMonitor *error_monitor, const VkDevice device, const VkRenderPassCreateInfo2KHR *create_info,
+                              const char *rp2_vuid);
 void TestRenderPassBegin(ErrorMonitor *error_monitor, const VkDevice device, const VkCommandBuffer command_buffer,
                          const VkRenderPassBeginInfo *begin_info, bool rp2Supported, const char *rp1_vuid, const char *rp2_vuid);
 
@@ -760,4 +775,5 @@ void CreateBufferViewTest(VkLayerTest &test, const VkBufferViewCreateInfo *pCrea
 
 void CreateImageViewTest(VkLayerTest &test, const VkImageViewCreateInfo *pCreateInfo, std::string code = "");
 
+void print_android(const char *c);
 #endif  // VKLAYERTEST_H

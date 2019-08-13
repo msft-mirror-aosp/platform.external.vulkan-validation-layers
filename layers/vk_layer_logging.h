@@ -137,6 +137,8 @@ struct LoggingLabelState {
     }
 };
 
+static inline int string_sprintf(std::string *output, const char *fmt, ...);
+
 typedef struct _debug_report_data {
     VkLayerDbgFunctionNode *debug_callback_list{nullptr};
     VkLayerDbgFunctionNode *default_debug_callback_list{nullptr};
@@ -146,8 +148,8 @@ typedef struct _debug_report_data {
     bool g_DEBUG_UTILS{false};
     bool queueLabelHasInsert{false};
     bool cmdBufLabelHasInsert{false};
-    std::unordered_map<uint64_t, std::string> debugObjectNameMap;
-    std::unordered_map<uint64_t, std::string> debugUtilsObjectNameMap;
+    std::unordered_map<uint64_t, VkDebugMarkerObjectNameInfoEXT> debugObjectNameMap;
+    std::unordered_map<uint64_t, VkDebugUtilsObjectNameInfoEXT> debugUtilsObjectNameMap;
     std::unordered_map<VkQueue, std::unique_ptr<LoggingLabelState>> debugUtilsQueueLabels;
     std::unordered_map<VkCommandBuffer, std::unique_ptr<LoggingLabelState>> debugUtilsCmdBufLabels;
     // This mutex is defined as mutable since the normal usage for a debug report object is as 'const'. The mutable keyword allows
@@ -156,8 +158,8 @@ typedef struct _debug_report_data {
 
     void DebugReportSetUtilsObjectName(const VkDebugUtilsObjectNameInfoEXT *pNameInfo) {
         std::unique_lock<std::mutex> lock(debug_report_mutex);
-        if (pNameInfo->pObjectName) {
-            debugUtilsObjectNameMap[pNameInfo->objectHandle] = pNameInfo->pObjectName;
+        if (pNameInfo) {
+            debugUtilsObjectNameMap[pNameInfo->objectHandle] = *pNameInfo;
         } else {
             debugUtilsObjectNameMap.erase(pNameInfo->objectHandle);
         }
@@ -165,8 +167,8 @@ typedef struct _debug_report_data {
 
     void DebugReportSetMarkerObjectName(const VkDebugMarkerObjectNameInfoEXT *pNameInfo) {
         std::unique_lock<std::mutex> lock(debug_report_mutex);
-        if (pNameInfo->pObjectName) {
-            debugObjectNameMap[pNameInfo->object] = pNameInfo->pObjectName;
+        if (pNameInfo) {
+            debugObjectNameMap[pNameInfo->object] = *pNameInfo;
         } else {
             debugObjectNameMap.erase(pNameInfo->object);
         }
@@ -176,7 +178,7 @@ typedef struct _debug_report_data {
         std::string label = "";
         const auto utils_name_iter = debugUtilsObjectNameMap.find(object);
         if (utils_name_iter != debugUtilsObjectNameMap.end()) {
-            label = utils_name_iter->second;
+            label = utils_name_iter->second.pObjectName;
         }
         return label;
     }
@@ -185,39 +187,29 @@ typedef struct _debug_report_data {
         std::string label = "";
         const auto marker_name_iter = debugObjectNameMap.find(object);
         if (marker_name_iter != debugObjectNameMap.end()) {
-            label = marker_name_iter->second;
+            label = marker_name_iter->second.pObjectName;
         }
         return label;
     }
 
-    std::string FormatHandle(const char * /* handle_name */, uint64_t h) const {
-        // Ignore handle_name string until the tests are changed to not fail when typename is emitted
-        char uint64_string[64];
-        sprintf(uint64_string, "0x%" PRIxLEAST64, h);
-        std::string ret = uint64_string;
+    std::string FormatHandle(const char *handle_type_name, uint64_t handle) const {
+        std::string handle_name = DebugReportGetUtilsObjectName(handle);
+        if (handle_name.empty()) {
+            handle_name = DebugReportGetMarkerObjectName(handle);
+        }
 
-        std::string name = DebugReportGetUtilsObjectName(h);
-        if (name.empty()) {
-            name = DebugReportGetMarkerObjectName(h);
-        }
-        if (!name.empty()) {
-            ret.append("[");
-            ret.append(name);
-            ret.append("]");
-        }
+        std::string ret;
+        string_sprintf(&ret, "%s 0x%" PRIxLEAST64 "[%s]", handle_type_name, handle, handle_name.c_str());
         return ret;
     }
-
-    // Backwards compatible path for entry points that pass uint64_t's
-    std::string FormatHandle(uint64_t h) const { return FormatHandle("", h); }
 
     std::string FormatHandle(const VulkanTypedHandle &handle) const {
         return FormatHandle(object_string[handle.type], handle.handle);
     }
 
     template <typename HANDLE_T>
-    std::string FormatHandle(HANDLE_T h) const {
-        return FormatHandle(VkHandleInfo<HANDLE_T>::Typename(), HandleToUint64(h));
+    std::string FormatHandle(HANDLE_T handle) const {
+        return FormatHandle(VkHandleInfo<HANDLE_T>::Typename(), HandleToUint64(handle));
     }
 
 } debug_report_data;
@@ -966,11 +958,11 @@ static inline int vasprintf(char **strp, char const *fmt, va_list ap) {
 // needs to be logged
 #ifndef WIN32
 static inline bool log_msg(const debug_report_data *debug_data, VkFlags msg_flags, VkDebugReportObjectTypeEXT object_type,
-                           uint64_t src_object, std::string vuid_text, const char *format, ...)
+                           uint64_t src_object, const std::string &vuid_text, const char *format, ...)
     __attribute__((format(printf, 6, 7)));
 #endif
 static inline bool log_msg(const debug_report_data *debug_data, VkFlags msg_flags, VkDebugReportObjectTypeEXT object_type,
-                           uint64_t src_object, std::string vuid_text, const char *format, ...) {
+                           uint64_t src_object, const std::string &vuid_text, const char *format, ...) {
     if (!debug_data) return false;
     std::unique_lock<std::mutex> lock(debug_data->debug_report_mutex);
     VkFlags local_severity = 0;
@@ -1065,6 +1057,19 @@ static inline VKAPI_ATTR VkBool32 VKAPI_CALL report_win32_debug_output_msg(VkFla
 static inline VKAPI_ATTR VkBool32 VKAPI_CALL DebugBreakCallback(VkFlags msgFlags, VkDebugReportObjectTypeEXT obj_type,
                                                                 uint64_t src_object, size_t location, int32_t msg_code,
                                                                 const char *layer_prefix, const char *message, void *user_data) {
+#ifdef WIN32
+    DebugBreak();
+#else
+    raise(SIGTRAP);
+#endif
+
+    return false;
+}
+
+static inline VKAPI_ATTR VkBool32 VKAPI_CALL MessengerBreakCallback(VkDebugUtilsMessageSeverityFlagBitsEXT message_severity,
+                                                                    VkDebugUtilsMessageTypeFlagsEXT message_type,
+                                                                    const VkDebugUtilsMessengerCallbackDataEXT *callback_data,
+                                                                    void *user_data) {
 #ifdef WIN32
     DebugBreak();
 #else
