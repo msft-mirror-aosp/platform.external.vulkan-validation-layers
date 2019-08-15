@@ -63,11 +63,6 @@ extern const std::vector<VkLogicOp> AllVkLogicOpEnums;
 extern const std::vector<VkBorderColor> AllVkBorderColorEnums;
 extern const std::vector<VkImageLayout> AllVkImageLayoutEnums;
 
-struct GenericHeader {
-    VkStructureType sType;
-    const void *pNext;
-};
-
 // String returned by string_VkStructureType for an unrecognized type.
 const std::string UnsupportedStructureTypeString = "Unhandled VkStructureType";
 
@@ -93,8 +88,6 @@ class StatelessValidation : public ValidationObject {
    public:
     VkPhysicalDeviceLimits device_limits = {};
     VkPhysicalDeviceFeatures physical_device_features = {};
-    VkDevice device = VK_NULL_HANDLE;
-    uint32_t api_version;
 
     // Override chassis read/write locks for this validation object
     // This override takes a deferred lock. i.e. it is not acquired.
@@ -104,6 +97,7 @@ class StatelessValidation : public ValidationObject {
     struct DeviceExtensionProperties {
         VkPhysicalDeviceShadingRateImagePropertiesNV shading_rate_image_props;
         VkPhysicalDeviceMeshShaderPropertiesNV mesh_shader_props;
+        VkPhysicalDeviceRayTracingPropertiesNV ray_tracing_props;
     };
     DeviceExtensionProperties phys_dev_ext_props = {};
 
@@ -476,7 +470,7 @@ class StatelessValidation : public ValidationObject {
     }
 
     // Forward declaration for pNext validation
-    bool ValidatePnextStructContents(const char *api_name, const ParameterName &parameter_name, const GenericHeader *header);
+    bool ValidatePnextStructContents(const char *api_name, const ParameterName &parameter_name, const VkBaseOutStructure *header);
 
     /**
      * Validate a structure's pNext member.
@@ -523,7 +517,7 @@ class StatelessValidation : public ValidationObject {
             } else {
                 const VkStructureType *start = allowed_types;
                 const VkStructureType *end = allowed_types + allowed_type_count;
-                const GenericHeader *current = reinterpret_cast<const GenericHeader *>(next);
+                const VkBaseOutStructure *current = reinterpret_cast<const VkBaseOutStructure *>(next);
 
                 cycle_check.insert(next);
 
@@ -576,7 +570,7 @@ class StatelessValidation : public ValidationObject {
                         }
                         skip_call |= ValidatePnextStructContents(api_name, parameter_name, current);
                     }
-                    current = reinterpret_cast<const GenericHeader *>(current->pNext);
+                    current = reinterpret_cast<const VkBaseOutStructure *>(current->pNext);
                 }
             }
         }
@@ -906,6 +900,8 @@ class StatelessValidation : public ValidationObject {
     bool ValidateDeviceQueueFamily(uint32_t queue_family, const char *cmd_name, const char *parameter_name,
                                    const std::string &error_code, bool optional);
 
+    bool ValidateAccelerationStructureInfoNV(const VkAccelerationStructureInfoNV &info);
+
     bool OutputExtensionError(const std::string &api_name, const std::string &extension_name);
 
     void PostCallRecordCreateRenderPass(VkDevice device, const VkRenderPassCreateInfo *pCreateInfo,
@@ -956,7 +952,7 @@ class StatelessValidation : public ValidationObject {
     bool manual_PreCallValidateUpdateDescriptorSets(VkDevice device, uint32_t descriptorWriteCount,
                                                     const VkWriteDescriptorSet *pDescriptorWrites, uint32_t descriptorCopyCount,
                                                     const VkCopyDescriptorSet *pDescriptorCopies);
-    ;
+
     bool manual_PreCallValidateFreeDescriptorSets(VkDevice device, VkDescriptorPool descriptorPool, uint32_t descriptorSetCount,
                                                   const VkDescriptorSet *pDescriptorSets);
 
@@ -986,6 +982,10 @@ class StatelessValidation : public ValidationObject {
 
     bool manual_PreCallValidateCmdDrawIndexedIndirect(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDeviceSize offset,
                                                       uint32_t count, uint32_t stride);
+
+    bool manual_PreCallValidateCmdClearAttachments(VkCommandBuffer commandBuffer, uint32_t attachmentCount,
+                                                   const VkClearAttachment *pAttachments, uint32_t rectCount,
+                                                   const VkClearRect *pRects);
 
     bool manual_PreCallValidateCmdCopyImage(VkCommandBuffer commandBuffer, VkImage srcImage, VkImageLayout srcImageLayout,
                                             VkImage dstImage, VkImageLayout dstImageLayout, uint32_t regionCount,
@@ -1049,5 +1049,25 @@ class StatelessValidation : public ValidationObject {
                                                                   uint32_t *pPropertyCount, VkExtensionProperties *pProperties);
     bool manual_PreCallValidateAllocateMemory(VkDevice device, const VkMemoryAllocateInfo *pAllocateInfo,
                                               const VkAllocationCallbacks *pAllocator, VkDeviceMemory *pMemory);
+
+    bool manual_PreCallValidateCreateAccelerationStructureNV(VkDevice device,
+                                                             const VkAccelerationStructureCreateInfoNV *pCreateInfo,
+                                                             const VkAllocationCallbacks *pAllocator,
+                                                             VkAccelerationStructureNV *pAccelerationStructure);
+    bool manual_PreCallValidateCmdBuildAccelerationStructureNV(VkCommandBuffer commandBuffer,
+                                                               const VkAccelerationStructureInfoNV *pInfo, VkBuffer instanceData,
+                                                               VkDeviceSize instanceOffset, VkBool32 update,
+                                                               VkAccelerationStructureNV dst, VkAccelerationStructureNV src,
+                                                               VkBuffer scratch, VkDeviceSize scratchOffset);
+    bool manual_PreCallValidateGetAccelerationStructureHandleNV(VkDevice device, VkAccelerationStructureNV accelerationStructure,
+                                                                size_t dataSize, void *pData);
+    bool manual_PreCallValidateCreateRayTracingPipelinesNV(VkDevice device, VkPipelineCache pipelineCache, uint32_t createInfoCount,
+                                                           const VkRayTracingPipelineCreateInfoNV *pCreateInfos,
+                                                           const VkAllocationCallbacks *pAllocator, VkPipeline *pPipelines);
+
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+    bool PreCallValidateGetDeviceGroupSurfacePresentModes2EXT(VkDevice device, const VkPhysicalDeviceSurfaceInfo2KHR *pSurfaceInfo,
+                                                              VkDeviceGroupPresentModeFlagsKHR *pModes);
+#endif  // VK_USE_PLATFORM_WIN32_KHR
 #include "parameter_validation.h"
 };  // Class StatelessValidation

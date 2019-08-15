@@ -64,6 +64,7 @@ from io import open
 #     separate line, align parameter names at the specified column
 class ObjectTrackerGeneratorOptions(GeneratorOptions):
     def __init__(self,
+                 conventions = None,
                  filename = None,
                  directory = '.',
                  apiname = None,
@@ -87,7 +88,7 @@ class ObjectTrackerGeneratorOptions(GeneratorOptions):
                  alignFuncParam = 0,
                  expandEnumerants = True,
                  valid_usage_path = ''):
-        GeneratorOptions.__init__(self, filename, directory, apiname, profile,
+        GeneratorOptions.__init__(self, conventions, filename, directory, apiname, profile,
                                   versions, emitversions, defaultExtensions,
                                   addExtensions, removeExtensions, emitExtensions, sortProcedure)
         self.prefixText      = prefixText
@@ -160,6 +161,9 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
             'vkGetPhysicalDeviceDisplayProperties2KHR',
             'vkGetDisplayModePropertiesKHR',
             'vkGetDisplayModeProperties2KHR',
+            'vkAcquirePerformanceConfigurationINTEL',
+            'vkReleasePerformanceConfigurationINTEL',
+            'vkQueueSetPerformanceConfigurationINTEL',
             ]
         # These VUIDS are not implicit, but are best handled in this layer. Codegen for vkDestroy calls will generate a key
         # which is translated here into a good VU.  Saves ~40 checks.
@@ -265,7 +269,7 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
             if alias:
                 alias_string = 'VUID-%s-%s' % (alias, suffix)
                 if alias_string in self.valid_vuids:
-                    vuid = "\"%s\"" % vuid_string
+                    vuid = "\"%s\"" % alias_string
         return vuid
     #
     # Increases indent by 4 spaces and tracks it globally
@@ -297,7 +301,7 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
         output_func += '    bool skip = false;\n'
         output_func += '    skip |= DeviceReportUndestroyedObjects(device, kVulkanObjectTypeCommandBuffer, error_code);\n'
         for handle in self.object_types:
-            if self.isHandleTypeNonDispatchable(handle):
+            if self.handle_types.IsNonDispatchable(handle):
                 output_func += '    skip |= DeviceReportUndestroyedObjects(device, %s, error_code);\n' % (self.GetVulkanObjType(handle))
         output_func += '    return skip;\n'
         output_func += '}\n'
@@ -310,7 +314,7 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
         output_func += 'void ObjectLifetimes::DestroyUndestroyedObjects(VkDevice device) {\n'
         output_func += '    DeviceDestroyUndestroyedObjects(device, kVulkanObjectTypeCommandBuffer);\n'
         for handle in self.object_types:
-            if self.isHandleTypeNonDispatchable(handle):
+            if self.handle_types.IsNonDispatchable(handle):
                 output_func += '    DeviceDestroyUndestroyedObjects(device, %s);\n' % (self.GetVulkanObjType(handle))
         output_func += '}\n'
         return output_func
@@ -341,6 +345,10 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
     # Called at beginning of processing as file is opened
     def beginFile(self, genOpts):
         OutputGenerator.beginFile(self, genOpts)
+
+        # Initialize members that require the tree
+        self.handle_types = GetHandleTypes(self.registry.tree)
+        self.type_categories = GetTypeCategories(self.registry.tree)
 
         header_file = (genOpts.filename == 'object_tracker.h')
         source_file = (genOpts.filename == 'object_tracker.cpp')
@@ -490,32 +498,9 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
     def paramIsPointer(self, param):
         ispointer = False
         for elem in param:
-            if ((elem.tag is not 'type') and (elem.tail is not None)) and '*' in elem.tail:
+            if elem.tag == 'type' and elem.tail is not None and '*' in elem.tail:
                 ispointer = True
         return ispointer
-    #
-    # Get the category of a type
-    def getTypeCategory(self, typename):
-        types = self.registry.tree.findall("types/type")
-        for elem in types:
-            if (elem.find("name") is not None and elem.find('name').text == typename) or elem.attrib.get('name') == typename:
-                return elem.attrib.get('category')
-    #
-    # Check if a parent object is dispatchable or not
-    def isHandleTypeObject(self, handletype):
-        handle = self.registry.tree.find("types/type/[name='" + handletype + "'][@category='handle']")
-        if handle is not None:
-            return True
-        else:
-            return False
-    #
-    # Check if a parent object is dispatchable or not
-    def isHandleTypeNonDispatchable(self, handletype):
-        handle = self.registry.tree.find("types/type/[name='" + handletype + "'][@category='handle']")
-        if handle is not None and handle.find('type').text == 'VK_DEFINE_NON_DISPATCHABLE_HANDLE':
-            return True
-        else:
-            return False
     #
     # Retrieve the type and name for a parameter
     def getTypeNameTuple(self, param):
@@ -611,7 +596,7 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
         struct_members = struct_member_dict[struct_item]
 
         for member in struct_members:
-            if self.isHandleTypeObject(member.type):
+            if member.type in self.handle_types:
                 return True
             # recurse for member structs, guard against infinite recursion
             elif member.type in struct_member_dict and member.type != struct_item:
@@ -624,7 +609,7 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
         struct_list = set()
         for item in item_list:
             paramtype = item.find('type')
-            typecategory = self.getTypeCategory(paramtype.text)
+            typecategory = self.type_categories[paramtype.text]
             if typecategory == 'struct':
                 if self.struct_contains_object(paramtype.text) == True:
                     struct_list.add(item)
@@ -638,7 +623,7 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
         else:
             member_list = item_list
         for item in member_list:
-            if self.isHandleTypeObject(paramtype.text):
+            if paramtype.text in self.handle_types:
                 object_list.add(item)
         return object_list
     #
@@ -680,7 +665,7 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
         handle_type = params[-1].find('type')
         is_create_pipelines = False
 
-        if self.isHandleTypeObject(handle_type.text):
+        if handle_type.text in self.handle_types:
             # Check for special case where multiple handles are returned
             object_array = False
             if cmd_info[-1].len is not None:
@@ -691,6 +676,8 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
                 if 'CreateGraphicsPipelines' in proto.text or 'CreateComputePipelines' in proto.text or 'CreateRayTracingPipelines' in proto.text:
                     is_create_pipelines = True
                     create_obj_code += '%sif (VK_ERROR_VALIDATION_FAILED_EXT == result) return;\n' % indent
+                create_obj_code += '%sif (%s) {\n' % (indent, handle_name.text)
+                indent = self.incIndent(indent)
                 countispointer = ''
                 if 'uint32_t*' in cmd_info[-2].cdecl:
                     countispointer = '*'
@@ -705,7 +692,10 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
             if object_array == True:
                 indent = self.decIndent(indent)
                 create_obj_code += '%s}\n' % indent
+                indent = self.decIndent(indent)
+                create_obj_code += '%s}\n' % indent
             indent = self.decIndent(indent)
+
         return create_obj_code
     #
     # Generate source for destroying a non-dispatchable object
@@ -724,7 +714,7 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
             nullalloc_vuid_string = '%s-nullalloc' % cmd_info[param].name
             compatalloc_vuid = self.manual_vuids.get(compatalloc_vuid_string, "kVUIDUndefined")
             nullalloc_vuid = self.manual_vuids.get(nullalloc_vuid_string, "kVUIDUndefined")
-            if self.isHandleTypeObject(cmd_info[param].type) == True:
+            if cmd_info[param].type in self.handle_types:
                 if object_array == True:
                     # This API is freeing an array of handles -- add loop control
                     validate_code += 'HEY, NEED TO DESTROY AN ARRAY\n'
@@ -747,9 +737,14 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
         if parent_vuid == 'kVUIDUndefined':
             parent_vuid = self.GetVuid(parent_name, 'commonparent')
         if obj_count is not None:
+
+            pre_call_code += '%sif (%s%s) {\n' % (indent, prefix, obj_name)
+            indent = self.incIndent(indent)
             pre_call_code += '%sfor (uint32_t %s = 0; %s < %s; ++%s) {\n' % (indent, index, index, obj_count, index)
             indent = self.incIndent(indent)
             pre_call_code += '%sskip |= ValidateObject(%s, %s%s[%s], %s, %s, %s, %s);\n' % (indent, disp_name, prefix, obj_name, index, self.GetVulkanObjType(obj_type), null_allowed, param_vuid, parent_vuid)
+            indent = self.decIndent(indent)
+            pre_call_code += '%s}\n' % indent
             indent = self.decIndent(indent)
             pre_call_code += '%s}\n' % indent
         else:
@@ -766,7 +761,7 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
             # Handle objects
             if member.iscreate and first_level_param and member == members[-1]:
                 continue
-            if self.isHandleTypeObject(member.type) == True:
+            if member.type in self.handle_types:
                 count_name = member.len
                 if (count_name is not None):
                     count_name = '%s%s' % (prefix, member.len)
@@ -876,7 +871,7 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
             isconst = True if 'const' in cdecl else False
             # Mark param as local if it is an array of objects
             islocal = False;
-            if self.isHandleTypeObject(type) == True:
+            if type in self.handle_types:
                 if (length is not None) and (isconst == True):
                     islocal = True
             # Or if it's a struct that contains an object
