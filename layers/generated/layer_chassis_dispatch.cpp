@@ -30,343 +30,29 @@
 // This intentionally includes a cpp file
 #include "vk_safe_struct.cpp"
 
-std::mutex dispatch_lock;
+// shared_mutex support added in MSVC 2015 update 2
+#if defined(_MSC_FULL_VER) && _MSC_FULL_VER >= 190023918 && NTDDI_VERSION > NTDDI_WIN10_RS2
+    #include <shared_mutex>
+    typedef std::shared_mutex dispatch_lock_t;
+    typedef std::shared_lock<dispatch_lock_t> read_dispatch_lock_guard_t;
+    typedef std::unique_lock<dispatch_lock_t> write_dispatch_lock_guard_t;
+#else
+    typedef std::mutex dispatch_lock_t;
+    typedef std::unique_lock<dispatch_lock_t> read_dispatch_lock_guard_t;
+    typedef std::unique_lock<dispatch_lock_t> write_dispatch_lock_guard_t;
+#endif
+dispatch_lock_t dispatch_lock;
 
 // Unique Objects pNext extension handling function
-void *CreateUnwrappedExtensionStructs(ValidationObject *layer_data, const void *pNext) {
+void WrapPnextChainHandles(ValidationObject *layer_data, const void *pNext) {
     void *cur_pnext = const_cast<void *>(pNext);
-    void *head_pnext = NULL;
-    void *prev_ext_struct = NULL;
-    void *cur_ext_struct = NULL;
-
     while (cur_pnext != NULL) {
         VkBaseOutStructure *header = reinterpret_cast<VkBaseOutStructure *>(cur_pnext);
 
         switch (header->sType) {
-            case VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT: {
-                    safe_VkDebugReportCallbackCreateInfoEXT *safe_struct = new safe_VkDebugReportCallbackCreateInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkDebugReportCallbackCreateInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT: {
-                    safe_VkDebugUtilsMessengerCreateInfoEXT *safe_struct = new safe_VkDebugUtilsMessengerCreateInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkDebugUtilsMessengerCreateInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT: {
-                    safe_VkValidationFeaturesEXT *safe_struct = new safe_VkValidationFeaturesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkValidationFeaturesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_VALIDATION_FLAGS_EXT: {
-                    safe_VkValidationFlagsEXT *safe_struct = new safe_VkValidationFlagsEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkValidationFlagsEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_DEVICE_QUEUE_GLOBAL_PRIORITY_CREATE_INFO_EXT: {
-                    safe_VkDeviceQueueGlobalPriorityCreateInfoEXT *safe_struct = new safe_VkDeviceQueueGlobalPriorityCreateInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkDeviceQueueGlobalPriorityCreateInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_DEVICE_GROUP_DEVICE_CREATE_INFO: {
-                    safe_VkDeviceGroupDeviceCreateInfo *safe_struct = new safe_VkDeviceGroupDeviceCreateInfo;
-                    safe_struct->initialize(reinterpret_cast<const VkDeviceGroupDeviceCreateInfo *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_DEVICE_MEMORY_OVERALLOCATION_CREATE_INFO_AMD: {
-                    safe_VkDeviceMemoryOverallocationCreateInfoAMD *safe_struct = new safe_VkDeviceMemoryOverallocationCreateInfoAMD;
-                    safe_struct->initialize(reinterpret_cast<const VkDeviceMemoryOverallocationCreateInfoAMD *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES: {
-                    safe_VkPhysicalDevice16BitStorageFeatures *safe_struct = new safe_VkPhysicalDevice16BitStorageFeatures;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDevice16BitStorageFeatures *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES_KHR: {
-                    safe_VkPhysicalDevice8BitStorageFeaturesKHR *safe_struct = new safe_VkPhysicalDevice8BitStorageFeaturesKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDevice8BitStorageFeaturesKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ASTC_DECODE_FEATURES_EXT: {
-                    safe_VkPhysicalDeviceASTCDecodeFeaturesEXT *safe_struct = new safe_VkPhysicalDeviceASTCDecodeFeaturesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceASTCDecodeFeaturesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BLEND_OPERATION_ADVANCED_FEATURES_EXT: {
-                    safe_VkPhysicalDeviceBlendOperationAdvancedFeaturesEXT *safe_struct = new safe_VkPhysicalDeviceBlendOperationAdvancedFeaturesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceBlendOperationAdvancedFeaturesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_EXT: {
-                    safe_VkPhysicalDeviceBufferDeviceAddressFeaturesEXT *safe_struct = new safe_VkPhysicalDeviceBufferDeviceAddressFeaturesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceBufferDeviceAddressFeaturesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_NV: {
-                    safe_VkPhysicalDeviceComputeShaderDerivativesFeaturesNV *safe_struct = new safe_VkPhysicalDeviceComputeShaderDerivativesFeaturesNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceComputeShaderDerivativesFeaturesNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CONDITIONAL_RENDERING_FEATURES_EXT: {
-                    safe_VkPhysicalDeviceConditionalRenderingFeaturesEXT *safe_struct = new safe_VkPhysicalDeviceConditionalRenderingFeaturesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceConditionalRenderingFeaturesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_NV: {
-                    safe_VkPhysicalDeviceCooperativeMatrixFeaturesNV *safe_struct = new safe_VkPhysicalDeviceCooperativeMatrixFeaturesNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceCooperativeMatrixFeaturesNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CORNER_SAMPLED_IMAGE_FEATURES_NV: {
-                    safe_VkPhysicalDeviceCornerSampledImageFeaturesNV *safe_struct = new safe_VkPhysicalDeviceCornerSampledImageFeaturesNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceCornerSampledImageFeaturesNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COVERAGE_REDUCTION_MODE_FEATURES_NV: {
-                    safe_VkPhysicalDeviceCoverageReductionModeFeaturesNV *safe_struct = new safe_VkPhysicalDeviceCoverageReductionModeFeaturesNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceCoverageReductionModeFeaturesNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEDICATED_ALLOCATION_IMAGE_ALIASING_FEATURES_NV: {
-                    safe_VkPhysicalDeviceDedicatedAllocationImageAliasingFeaturesNV *safe_struct = new safe_VkPhysicalDeviceDedicatedAllocationImageAliasingFeaturesNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceDedicatedAllocationImageAliasingFeaturesNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_ENABLE_FEATURES_EXT: {
-                    safe_VkPhysicalDeviceDepthClipEnableFeaturesEXT *safe_struct = new safe_VkPhysicalDeviceDepthClipEnableFeaturesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceDepthClipEnableFeaturesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT: {
-                    safe_VkPhysicalDeviceDescriptorIndexingFeaturesEXT *safe_struct = new safe_VkPhysicalDeviceDescriptorIndexingFeaturesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceDescriptorIndexingFeaturesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXCLUSIVE_SCISSOR_FEATURES_NV: {
-                    safe_VkPhysicalDeviceExclusiveScissorFeaturesNV *safe_struct = new safe_VkPhysicalDeviceExclusiveScissorFeaturesNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceExclusiveScissorFeaturesNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2: {
-                    safe_VkPhysicalDeviceFeatures2 *safe_struct = new safe_VkPhysicalDeviceFeatures2;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceFeatures2 *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT16_INT8_FEATURES_KHR: {
-                    safe_VkPhysicalDeviceFloat16Int8FeaturesKHR *safe_struct = new safe_VkPhysicalDeviceFloat16Int8FeaturesKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceFloat16Int8FeaturesKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_FEATURES_EXT: {
-                    safe_VkPhysicalDeviceFragmentDensityMapFeaturesEXT *safe_struct = new safe_VkPhysicalDeviceFragmentDensityMapFeaturesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceFragmentDensityMapFeaturesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_NV: {
-                    safe_VkPhysicalDeviceFragmentShaderBarycentricFeaturesNV *safe_struct = new safe_VkPhysicalDeviceFragmentShaderBarycentricFeaturesNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceFragmentShaderBarycentricFeaturesNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_INTERLOCK_FEATURES_EXT: {
-                    safe_VkPhysicalDeviceFragmentShaderInterlockFeaturesEXT *safe_struct = new safe_VkPhysicalDeviceFragmentShaderInterlockFeaturesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceFragmentShaderInterlockFeaturesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES_EXT: {
-                    safe_VkPhysicalDeviceHostQueryResetFeaturesEXT *safe_struct = new safe_VkPhysicalDeviceHostQueryResetFeaturesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceHostQueryResetFeaturesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGELESS_FRAMEBUFFER_FEATURES_KHR: {
-                    safe_VkPhysicalDeviceImagelessFramebufferFeaturesKHR *safe_struct = new safe_VkPhysicalDeviceImagelessFramebufferFeaturesKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceImagelessFramebufferFeaturesKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INLINE_UNIFORM_BLOCK_FEATURES_EXT: {
-                    safe_VkPhysicalDeviceInlineUniformBlockFeaturesEXT *safe_struct = new safe_VkPhysicalDeviceInlineUniformBlockFeaturesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceInlineUniformBlockFeaturesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT: {
-                    safe_VkPhysicalDeviceMemoryPriorityFeaturesEXT *safe_struct = new safe_VkPhysicalDeviceMemoryPriorityFeaturesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceMemoryPriorityFeaturesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_NV: {
-                    safe_VkPhysicalDeviceMeshShaderFeaturesNV *safe_struct = new safe_VkPhysicalDeviceMeshShaderFeaturesNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceMeshShaderFeaturesNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES: {
-                    safe_VkPhysicalDeviceMultiviewFeatures *safe_struct = new safe_VkPhysicalDeviceMultiviewFeatures;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceMultiviewFeatures *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_FEATURES: {
-                    safe_VkPhysicalDeviceProtectedMemoryFeatures *safe_struct = new safe_VkPhysicalDeviceProtectedMemoryFeatures;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceProtectedMemoryFeatures *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_REPRESENTATIVE_FRAGMENT_TEST_FEATURES_NV: {
-                    safe_VkPhysicalDeviceRepresentativeFragmentTestFeaturesNV *safe_struct = new safe_VkPhysicalDeviceRepresentativeFragmentTestFeaturesNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceRepresentativeFragmentTestFeaturesNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES: {
-                    safe_VkPhysicalDeviceSamplerYcbcrConversionFeatures *safe_struct = new safe_VkPhysicalDeviceSamplerYcbcrConversionFeatures;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceSamplerYcbcrConversionFeatures *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES_EXT: {
-                    safe_VkPhysicalDeviceScalarBlockLayoutFeaturesEXT *safe_struct = new safe_VkPhysicalDeviceScalarBlockLayoutFeaturesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceScalarBlockLayoutFeaturesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES_KHR: {
-                    safe_VkPhysicalDeviceShaderAtomicInt64FeaturesKHR *safe_struct = new safe_VkPhysicalDeviceShaderAtomicInt64FeaturesKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceShaderAtomicInt64FeaturesKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES_EXT: {
-                    safe_VkPhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT *safe_struct = new safe_VkPhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES: {
-                    safe_VkPhysicalDeviceShaderDrawParametersFeatures *safe_struct = new safe_VkPhysicalDeviceShaderDrawParametersFeatures;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceShaderDrawParametersFeatures *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_IMAGE_FOOTPRINT_FEATURES_NV: {
-                    safe_VkPhysicalDeviceShaderImageFootprintFeaturesNV *safe_struct = new safe_VkPhysicalDeviceShaderImageFootprintFeaturesNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceShaderImageFootprintFeaturesNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_FUNCTIONS2_FEATURES_INTEL: {
-                    safe_VkPhysicalDeviceShaderIntegerFunctions2INTEL *safe_struct = new safe_VkPhysicalDeviceShaderIntegerFunctions2INTEL;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceShaderIntegerFunctions2INTEL *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SM_BUILTINS_FEATURES_NV: {
-                    safe_VkPhysicalDeviceShaderSMBuiltinsFeaturesNV *safe_struct = new safe_VkPhysicalDeviceShaderSMBuiltinsFeaturesNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceShaderSMBuiltinsFeaturesNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADING_RATE_IMAGE_FEATURES_NV: {
-                    safe_VkPhysicalDeviceShadingRateImageFeaturesNV *safe_struct = new safe_VkPhysicalDeviceShadingRateImageFeaturesNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceShadingRateImageFeaturesNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXEL_BUFFER_ALIGNMENT_FEATURES_EXT: {
-                    safe_VkPhysicalDeviceTexelBufferAlignmentFeaturesEXT *safe_struct = new safe_VkPhysicalDeviceTexelBufferAlignmentFeaturesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceTexelBufferAlignmentFeaturesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT: {
-                    safe_VkPhysicalDeviceTransformFeedbackFeaturesEXT *safe_struct = new safe_VkPhysicalDeviceTransformFeedbackFeaturesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceTransformFeedbackFeaturesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFORM_BUFFER_STANDARD_LAYOUT_FEATURES_KHR: {
-                    safe_VkPhysicalDeviceUniformBufferStandardLayoutFeaturesKHR *safe_struct = new safe_VkPhysicalDeviceUniformBufferStandardLayoutFeaturesKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceUniformBufferStandardLayoutFeaturesKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES: {
-                    safe_VkPhysicalDeviceVariablePointersFeatures *safe_struct = new safe_VkPhysicalDeviceVariablePointersFeatures;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceVariablePointersFeatures *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES_EXT: {
-                    safe_VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT *safe_struct = new safe_VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES_KHR: {
-                    safe_VkPhysicalDeviceVulkanMemoryModelFeaturesKHR *safe_struct = new safe_VkPhysicalDeviceVulkanMemoryModelFeaturesKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceVulkanMemoryModelFeaturesKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_YCBCR_IMAGE_ARRAYS_FEATURES_EXT: {
-                    safe_VkPhysicalDeviceYcbcrImageArraysFeaturesEXT *safe_struct = new safe_VkPhysicalDeviceYcbcrImageArraysFeaturesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceYcbcrImageArraysFeaturesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR 
-            case VK_STRUCTURE_TYPE_D3D12_FENCE_SUBMIT_INFO_KHR: {
-                    safe_VkD3D12FenceSubmitInfoKHR *safe_struct = new safe_VkD3D12FenceSubmitInfoKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkD3D12FenceSubmitInfoKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-#endif // VK_USE_PLATFORM_WIN32_KHR 
-
-            case VK_STRUCTURE_TYPE_DEVICE_GROUP_SUBMIT_INFO: {
-                    safe_VkDeviceGroupSubmitInfo *safe_struct = new safe_VkDeviceGroupSubmitInfo;
-                    safe_struct->initialize(reinterpret_cast<const VkDeviceGroupSubmitInfo *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PROTECTED_SUBMIT_INFO: {
-                    safe_VkProtectedSubmitInfo *safe_struct = new safe_VkProtectedSubmitInfo;
-                    safe_struct->initialize(reinterpret_cast<const VkProtectedSubmitInfo *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
 #ifdef VK_USE_PLATFORM_WIN32_KHR 
             case VK_STRUCTURE_TYPE_WIN32_KEYED_MUTEX_ACQUIRE_RELEASE_INFO_KHR: {
-                    safe_VkWin32KeyedMutexAcquireReleaseInfoKHR *safe_struct = new safe_VkWin32KeyedMutexAcquireReleaseInfoKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkWin32KeyedMutexAcquireReleaseInfoKHR *>(cur_pnext));
+                    safe_VkWin32KeyedMutexAcquireReleaseInfoKHR *safe_struct = reinterpret_cast<safe_VkWin32KeyedMutexAcquireReleaseInfoKHR *>(cur_pnext);
                     if (safe_struct->pAcquireSyncs) {
                         for (uint32_t index0 = 0; index0 < safe_struct->acquireCount; ++index0) {
                             safe_struct->pAcquireSyncs[index0] = layer_data->Unwrap(safe_struct->pAcquireSyncs[index0]);
@@ -377,14 +63,12 @@ void *CreateUnwrappedExtensionStructs(ValidationObject *layer_data, const void *
                             safe_struct->pReleaseSyncs[index0] = layer_data->Unwrap(safe_struct->pReleaseSyncs[index0]);
                         }
                     }
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
                 } break;
 #endif // VK_USE_PLATFORM_WIN32_KHR 
 
 #ifdef VK_USE_PLATFORM_WIN32_KHR 
             case VK_STRUCTURE_TYPE_WIN32_KEYED_MUTEX_ACQUIRE_RELEASE_INFO_NV: {
-                    safe_VkWin32KeyedMutexAcquireReleaseInfoNV *safe_struct = new safe_VkWin32KeyedMutexAcquireReleaseInfoNV;
-                    safe_struct->initialize(reinterpret_cast<const VkWin32KeyedMutexAcquireReleaseInfoNV *>(cur_pnext));
+                    safe_VkWin32KeyedMutexAcquireReleaseInfoNV *safe_struct = reinterpret_cast<safe_VkWin32KeyedMutexAcquireReleaseInfoNV *>(cur_pnext);
                     if (safe_struct->pAcquireSyncs) {
                         for (uint32_t index0 = 0; index0 < safe_struct->acquireCount; ++index0) {
                             safe_struct->pAcquireSyncs[index0] = layer_data->Unwrap(safe_struct->pAcquireSyncs[index0]);
@@ -395,1686 +79,81 @@ void *CreateUnwrappedExtensionStructs(ValidationObject *layer_data, const void *
                             safe_struct->pReleaseSyncs[index0] = layer_data->Unwrap(safe_struct->pReleaseSyncs[index0]);
                         }
                     }
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
                 } break;
 #endif // VK_USE_PLATFORM_WIN32_KHR 
 
             case VK_STRUCTURE_TYPE_DEDICATED_ALLOCATION_MEMORY_ALLOCATE_INFO_NV: {
-                    safe_VkDedicatedAllocationMemoryAllocateInfoNV *safe_struct = new safe_VkDedicatedAllocationMemoryAllocateInfoNV;
-                    safe_struct->initialize(reinterpret_cast<const VkDedicatedAllocationMemoryAllocateInfoNV *>(cur_pnext));
+                    safe_VkDedicatedAllocationMemoryAllocateInfoNV *safe_struct = reinterpret_cast<safe_VkDedicatedAllocationMemoryAllocateInfoNV *>(cur_pnext);
                     if (safe_struct->image) {
                         safe_struct->image = layer_data->Unwrap(safe_struct->image);
                     }
                     if (safe_struct->buffer) {
                         safe_struct->buffer = layer_data->Unwrap(safe_struct->buffer);
                     }
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO: {
-                    safe_VkExportMemoryAllocateInfo *safe_struct = new safe_VkExportMemoryAllocateInfo;
-                    safe_struct->initialize(reinterpret_cast<const VkExportMemoryAllocateInfo *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO_NV: {
-                    safe_VkExportMemoryAllocateInfoNV *safe_struct = new safe_VkExportMemoryAllocateInfoNV;
-                    safe_struct->initialize(reinterpret_cast<const VkExportMemoryAllocateInfoNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR 
-            case VK_STRUCTURE_TYPE_EXPORT_MEMORY_WIN32_HANDLE_INFO_KHR: {
-                    safe_VkExportMemoryWin32HandleInfoKHR *safe_struct = new safe_VkExportMemoryWin32HandleInfoKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkExportMemoryWin32HandleInfoKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-#endif // VK_USE_PLATFORM_WIN32_KHR 
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR 
-            case VK_STRUCTURE_TYPE_EXPORT_MEMORY_WIN32_HANDLE_INFO_NV: {
-                    safe_VkExportMemoryWin32HandleInfoNV *safe_struct = new safe_VkExportMemoryWin32HandleInfoNV;
-                    safe_struct->initialize(reinterpret_cast<const VkExportMemoryWin32HandleInfoNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-#endif // VK_USE_PLATFORM_WIN32_KHR 
-
-#ifdef VK_USE_PLATFORM_ANDROID_KHR 
-            case VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID: {
-                    safe_VkImportAndroidHardwareBufferInfoANDROID *safe_struct = new safe_VkImportAndroidHardwareBufferInfoANDROID;
-                    safe_struct->initialize(reinterpret_cast<const VkImportAndroidHardwareBufferInfoANDROID *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-#endif // VK_USE_PLATFORM_ANDROID_KHR 
-
-            case VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR: {
-                    safe_VkImportMemoryFdInfoKHR *safe_struct = new safe_VkImportMemoryFdInfoKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkImportMemoryFdInfoKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT: {
-                    safe_VkImportMemoryHostPointerInfoEXT *safe_struct = new safe_VkImportMemoryHostPointerInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkImportMemoryHostPointerInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR 
-            case VK_STRUCTURE_TYPE_IMPORT_MEMORY_WIN32_HANDLE_INFO_KHR: {
-                    safe_VkImportMemoryWin32HandleInfoKHR *safe_struct = new safe_VkImportMemoryWin32HandleInfoKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkImportMemoryWin32HandleInfoKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-#endif // VK_USE_PLATFORM_WIN32_KHR 
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR 
-            case VK_STRUCTURE_TYPE_IMPORT_MEMORY_WIN32_HANDLE_INFO_NV: {
-                    safe_VkImportMemoryWin32HandleInfoNV *safe_struct = new safe_VkImportMemoryWin32HandleInfoNV;
-                    safe_struct->initialize(reinterpret_cast<const VkImportMemoryWin32HandleInfoNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-#endif // VK_USE_PLATFORM_WIN32_KHR 
-
-            case VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO: {
-                    safe_VkMemoryAllocateFlagsInfo *safe_struct = new safe_VkMemoryAllocateFlagsInfo;
-                    safe_struct->initialize(reinterpret_cast<const VkMemoryAllocateFlagsInfo *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
                 } break;
 
             case VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO: {
-                    safe_VkMemoryDedicatedAllocateInfo *safe_struct = new safe_VkMemoryDedicatedAllocateInfo;
-                    safe_struct->initialize(reinterpret_cast<const VkMemoryDedicatedAllocateInfo *>(cur_pnext));
+                    safe_VkMemoryDedicatedAllocateInfo *safe_struct = reinterpret_cast<safe_VkMemoryDedicatedAllocateInfo *>(cur_pnext);
                     if (safe_struct->image) {
                         safe_struct->image = layer_data->Unwrap(safe_struct->image);
                     }
                     if (safe_struct->buffer) {
                         safe_struct->buffer = layer_data->Unwrap(safe_struct->buffer);
                     }
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_MEMORY_PRIORITY_ALLOCATE_INFO_EXT: {
-                    safe_VkMemoryPriorityAllocateInfoEXT *safe_struct = new safe_VkMemoryPriorityAllocateInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkMemoryPriorityAllocateInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_DEVICE_GROUP_BIND_SPARSE_INFO: {
-                    safe_VkDeviceGroupBindSparseInfo *safe_struct = new safe_VkDeviceGroupBindSparseInfo;
-                    safe_struct->initialize(reinterpret_cast<const VkDeviceGroupBindSparseInfo *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_EXPORT_FENCE_CREATE_INFO: {
-                    safe_VkExportFenceCreateInfo *safe_struct = new safe_VkExportFenceCreateInfo;
-                    safe_struct->initialize(reinterpret_cast<const VkExportFenceCreateInfo *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR 
-            case VK_STRUCTURE_TYPE_EXPORT_FENCE_WIN32_HANDLE_INFO_KHR: {
-                    safe_VkExportFenceWin32HandleInfoKHR *safe_struct = new safe_VkExportFenceWin32HandleInfoKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkExportFenceWin32HandleInfoKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-#endif // VK_USE_PLATFORM_WIN32_KHR 
-
-            case VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO: {
-                    safe_VkExportSemaphoreCreateInfo *safe_struct = new safe_VkExportSemaphoreCreateInfo;
-                    safe_struct->initialize(reinterpret_cast<const VkExportSemaphoreCreateInfo *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR 
-            case VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_WIN32_HANDLE_INFO_KHR: {
-                    safe_VkExportSemaphoreWin32HandleInfoKHR *safe_struct = new safe_VkExportSemaphoreWin32HandleInfoKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkExportSemaphoreWin32HandleInfoKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-#endif // VK_USE_PLATFORM_WIN32_KHR 
-
-            case VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_CREATE_INFO_EXT: {
-                    safe_VkBufferDeviceAddressCreateInfoEXT *safe_struct = new safe_VkBufferDeviceAddressCreateInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkBufferDeviceAddressCreateInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_DEDICATED_ALLOCATION_BUFFER_CREATE_INFO_NV: {
-                    safe_VkDedicatedAllocationBufferCreateInfoNV *safe_struct = new safe_VkDedicatedAllocationBufferCreateInfoNV;
-                    safe_struct->initialize(reinterpret_cast<const VkDedicatedAllocationBufferCreateInfoNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO: {
-                    safe_VkExternalMemoryBufferCreateInfo *safe_struct = new safe_VkExternalMemoryBufferCreateInfo;
-                    safe_struct->initialize(reinterpret_cast<const VkExternalMemoryBufferCreateInfo *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_DEDICATED_ALLOCATION_IMAGE_CREATE_INFO_NV: {
-                    safe_VkDedicatedAllocationImageCreateInfoNV *safe_struct = new safe_VkDedicatedAllocationImageCreateInfoNV;
-                    safe_struct->initialize(reinterpret_cast<const VkDedicatedAllocationImageCreateInfoNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-#ifdef VK_USE_PLATFORM_ANDROID_KHR 
-            case VK_STRUCTURE_TYPE_EXTERNAL_FORMAT_ANDROID: {
-                    safe_VkExternalFormatANDROID *safe_struct = new safe_VkExternalFormatANDROID;
-                    safe_struct->initialize(reinterpret_cast<const VkExternalFormatANDROID *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-#endif // VK_USE_PLATFORM_ANDROID_KHR 
-
-            case VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO: {
-                    safe_VkExternalMemoryImageCreateInfo *safe_struct = new safe_VkExternalMemoryImageCreateInfo;
-                    safe_struct->initialize(reinterpret_cast<const VkExternalMemoryImageCreateInfo *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO_NV: {
-                    safe_VkExternalMemoryImageCreateInfoNV *safe_struct = new safe_VkExternalMemoryImageCreateInfoNV;
-                    safe_struct->initialize(reinterpret_cast<const VkExternalMemoryImageCreateInfoNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT: {
-                    safe_VkImageDrmFormatModifierExplicitCreateInfoEXT *safe_struct = new safe_VkImageDrmFormatModifierExplicitCreateInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkImageDrmFormatModifierExplicitCreateInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_LIST_CREATE_INFO_EXT: {
-                    safe_VkImageDrmFormatModifierListCreateInfoEXT *safe_struct = new safe_VkImageDrmFormatModifierListCreateInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkImageDrmFormatModifierListCreateInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO_KHR: {
-                    safe_VkImageFormatListCreateInfoKHR *safe_struct = new safe_VkImageFormatListCreateInfoKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkImageFormatListCreateInfoKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_IMAGE_STENCIL_USAGE_CREATE_INFO_EXT: {
-                    safe_VkImageStencilUsageCreateInfoEXT *safe_struct = new safe_VkImageStencilUsageCreateInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkImageStencilUsageCreateInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
                 } break;
 
             case VK_STRUCTURE_TYPE_IMAGE_SWAPCHAIN_CREATE_INFO_KHR: {
-                    safe_VkImageSwapchainCreateInfoKHR *safe_struct = new safe_VkImageSwapchainCreateInfoKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkImageSwapchainCreateInfoKHR *>(cur_pnext));
+                    safe_VkImageSwapchainCreateInfoKHR *safe_struct = reinterpret_cast<safe_VkImageSwapchainCreateInfoKHR *>(cur_pnext);
                     if (safe_struct->swapchain) {
                         safe_struct->swapchain = layer_data->Unwrap(safe_struct->swapchain);
                     }
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_IMAGE_VIEW_ASTC_DECODE_MODE_EXT: {
-                    safe_VkImageViewASTCDecodeModeEXT *safe_struct = new safe_VkImageViewASTCDecodeModeEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkImageViewASTCDecodeModeEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO: {
-                    safe_VkImageViewUsageCreateInfo *safe_struct = new safe_VkImageViewUsageCreateInfo;
-                    safe_struct->initialize(reinterpret_cast<const VkImageViewUsageCreateInfo *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
                 } break;
 
             case VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO: {
-                    safe_VkSamplerYcbcrConversionInfo *safe_struct = new safe_VkSamplerYcbcrConversionInfo;
-                    safe_struct->initialize(reinterpret_cast<const VkSamplerYcbcrConversionInfo *>(cur_pnext));
+                    safe_VkSamplerYcbcrConversionInfo *safe_struct = reinterpret_cast<safe_VkSamplerYcbcrConversionInfo *>(cur_pnext);
                     if (safe_struct->conversion) {
                         safe_struct->conversion = layer_data->Unwrap(safe_struct->conversion);
                     }
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
                 } break;
 
             case VK_STRUCTURE_TYPE_SHADER_MODULE_VALIDATION_CACHE_CREATE_INFO_EXT: {
-                    safe_VkShaderModuleValidationCacheCreateInfoEXT *safe_struct = new safe_VkShaderModuleValidationCacheCreateInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkShaderModuleValidationCacheCreateInfoEXT *>(cur_pnext));
+                    safe_VkShaderModuleValidationCacheCreateInfoEXT *safe_struct = reinterpret_cast<safe_VkShaderModuleValidationCacheCreateInfoEXT *>(cur_pnext);
                     if (safe_struct->validationCache) {
                         safe_struct->validationCache = layer_data->Unwrap(safe_struct->validationCache);
                     }
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT: {
-                    safe_VkPipelineVertexInputDivisorStateCreateInfoEXT *safe_struct = new safe_VkPipelineVertexInputDivisorStateCreateInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPipelineVertexInputDivisorStateCreateInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_DOMAIN_ORIGIN_STATE_CREATE_INFO: {
-                    safe_VkPipelineTessellationDomainOriginStateCreateInfo *safe_struct = new safe_VkPipelineTessellationDomainOriginStateCreateInfo;
-                    safe_struct->initialize(reinterpret_cast<const VkPipelineTessellationDomainOriginStateCreateInfo *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_COARSE_SAMPLE_ORDER_STATE_CREATE_INFO_NV: {
-                    safe_VkPipelineViewportCoarseSampleOrderStateCreateInfoNV *safe_struct = new safe_VkPipelineViewportCoarseSampleOrderStateCreateInfoNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPipelineViewportCoarseSampleOrderStateCreateInfoNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_EXCLUSIVE_SCISSOR_STATE_CREATE_INFO_NV: {
-                    safe_VkPipelineViewportExclusiveScissorStateCreateInfoNV *safe_struct = new safe_VkPipelineViewportExclusiveScissorStateCreateInfoNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPipelineViewportExclusiveScissorStateCreateInfoNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_SHADING_RATE_IMAGE_STATE_CREATE_INFO_NV: {
-                    safe_VkPipelineViewportShadingRateImageStateCreateInfoNV *safe_struct = new safe_VkPipelineViewportShadingRateImageStateCreateInfoNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPipelineViewportShadingRateImageStateCreateInfoNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_SWIZZLE_STATE_CREATE_INFO_NV: {
-                    safe_VkPipelineViewportSwizzleStateCreateInfoNV *safe_struct = new safe_VkPipelineViewportSwizzleStateCreateInfoNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPipelineViewportSwizzleStateCreateInfoNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_W_SCALING_STATE_CREATE_INFO_NV: {
-                    safe_VkPipelineViewportWScalingStateCreateInfoNV *safe_struct = new safe_VkPipelineViewportWScalingStateCreateInfoNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPipelineViewportWScalingStateCreateInfoNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_CONSERVATIVE_STATE_CREATE_INFO_EXT: {
-                    safe_VkPipelineRasterizationConservativeStateCreateInfoEXT *safe_struct = new safe_VkPipelineRasterizationConservativeStateCreateInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPipelineRasterizationConservativeStateCreateInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_DEPTH_CLIP_STATE_CREATE_INFO_EXT: {
-                    safe_VkPipelineRasterizationDepthClipStateCreateInfoEXT *safe_struct = new safe_VkPipelineRasterizationDepthClipStateCreateInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPipelineRasterizationDepthClipStateCreateInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_RASTERIZATION_ORDER_AMD: {
-                    safe_VkPipelineRasterizationStateRasterizationOrderAMD *safe_struct = new safe_VkPipelineRasterizationStateRasterizationOrderAMD;
-                    safe_struct->initialize(reinterpret_cast<const VkPipelineRasterizationStateRasterizationOrderAMD *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_STREAM_CREATE_INFO_EXT: {
-                    safe_VkPipelineRasterizationStateStreamCreateInfoEXT *safe_struct = new safe_VkPipelineRasterizationStateStreamCreateInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPipelineRasterizationStateStreamCreateInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_COVERAGE_MODULATION_STATE_CREATE_INFO_NV: {
-                    safe_VkPipelineCoverageModulationStateCreateInfoNV *safe_struct = new safe_VkPipelineCoverageModulationStateCreateInfoNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPipelineCoverageModulationStateCreateInfoNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_COVERAGE_REDUCTION_STATE_CREATE_INFO_NV: {
-                    safe_VkPipelineCoverageReductionStateCreateInfoNV *safe_struct = new safe_VkPipelineCoverageReductionStateCreateInfoNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPipelineCoverageReductionStateCreateInfoNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_COVERAGE_TO_COLOR_STATE_CREATE_INFO_NV: {
-                    safe_VkPipelineCoverageToColorStateCreateInfoNV *safe_struct = new safe_VkPipelineCoverageToColorStateCreateInfoNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPipelineCoverageToColorStateCreateInfoNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_SAMPLE_LOCATIONS_STATE_CREATE_INFO_EXT: {
-                    safe_VkPipelineSampleLocationsStateCreateInfoEXT *safe_struct = new safe_VkPipelineSampleLocationsStateCreateInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPipelineSampleLocationsStateCreateInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_ADVANCED_STATE_CREATE_INFO_EXT: {
-                    safe_VkPipelineColorBlendAdvancedStateCreateInfoEXT *safe_struct = new safe_VkPipelineColorBlendAdvancedStateCreateInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPipelineColorBlendAdvancedStateCreateInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO_EXT: {
-                    safe_VkPipelineCreationFeedbackCreateInfoEXT *safe_struct = new safe_VkPipelineCreationFeedbackCreateInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPipelineCreationFeedbackCreateInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_DISCARD_RECTANGLE_STATE_CREATE_INFO_EXT: {
-                    safe_VkPipelineDiscardRectangleStateCreateInfoEXT *safe_struct = new safe_VkPipelineDiscardRectangleStateCreateInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPipelineDiscardRectangleStateCreateInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_REPRESENTATIVE_FRAGMENT_TEST_STATE_CREATE_INFO_NV: {
-                    safe_VkPipelineRepresentativeFragmentTestStateCreateInfoNV *safe_struct = new safe_VkPipelineRepresentativeFragmentTestStateCreateInfoNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPipelineRepresentativeFragmentTestStateCreateInfoNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO_EXT: {
-                    safe_VkSamplerReductionModeCreateInfoEXT *safe_struct = new safe_VkSamplerReductionModeCreateInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkSamplerReductionModeCreateInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT: {
-                    safe_VkDescriptorSetLayoutBindingFlagsCreateInfoEXT *safe_struct = new safe_VkDescriptorSetLayoutBindingFlagsCreateInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkDescriptorSetLayoutBindingFlagsCreateInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_INLINE_UNIFORM_BLOCK_CREATE_INFO_EXT: {
-                    safe_VkDescriptorPoolInlineUniformBlockCreateInfoEXT *safe_struct = new safe_VkDescriptorPoolInlineUniformBlockCreateInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkDescriptorPoolInlineUniformBlockCreateInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT: {
-                    safe_VkDescriptorSetVariableDescriptorCountAllocateInfoEXT *safe_struct = new safe_VkDescriptorSetVariableDescriptorCountAllocateInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkDescriptorSetVariableDescriptorCountAllocateInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
                 } break;
 
             case VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_NV: {
-                    safe_VkWriteDescriptorSetAccelerationStructureNV *safe_struct = new safe_VkWriteDescriptorSetAccelerationStructureNV;
-                    safe_struct->initialize(reinterpret_cast<const VkWriteDescriptorSetAccelerationStructureNV *>(cur_pnext));
+                    safe_VkWriteDescriptorSetAccelerationStructureNV *safe_struct = reinterpret_cast<safe_VkWriteDescriptorSetAccelerationStructureNV *>(cur_pnext);
                     if (safe_struct->pAccelerationStructures) {
                         for (uint32_t index0 = 0; index0 < safe_struct->accelerationStructureCount; ++index0) {
                             safe_struct->pAccelerationStructures[index0] = layer_data->Unwrap(safe_struct->pAccelerationStructures[index0]);
                         }
                     }
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_INLINE_UNIFORM_BLOCK_EXT: {
-                    safe_VkWriteDescriptorSetInlineUniformBlockEXT *safe_struct = new safe_VkWriteDescriptorSetInlineUniformBlockEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkWriteDescriptorSetInlineUniformBlockEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_FRAMEBUFFER_ATTACHMENTS_CREATE_INFO_KHR: {
-                    safe_VkFramebufferAttachmentsCreateInfoKHR *safe_struct = new safe_VkFramebufferAttachmentsCreateInfoKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkFramebufferAttachmentsCreateInfoKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_RENDER_PASS_FRAGMENT_DENSITY_MAP_CREATE_INFO_EXT: {
-                    safe_VkRenderPassFragmentDensityMapCreateInfoEXT *safe_struct = new safe_VkRenderPassFragmentDensityMapCreateInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkRenderPassFragmentDensityMapCreateInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_RENDER_PASS_INPUT_ATTACHMENT_ASPECT_CREATE_INFO: {
-                    safe_VkRenderPassInputAttachmentAspectCreateInfo *safe_struct = new safe_VkRenderPassInputAttachmentAspectCreateInfo;
-                    safe_struct->initialize(reinterpret_cast<const VkRenderPassInputAttachmentAspectCreateInfo *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO: {
-                    safe_VkRenderPassMultiviewCreateInfo *safe_struct = new safe_VkRenderPassMultiviewCreateInfo;
-                    safe_struct->initialize(reinterpret_cast<const VkRenderPassMultiviewCreateInfo *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_CONDITIONAL_RENDERING_INFO_EXT: {
-                    safe_VkCommandBufferInheritanceConditionalRenderingInfoEXT *safe_struct = new safe_VkCommandBufferInheritanceConditionalRenderingInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkCommandBufferInheritanceConditionalRenderingInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_DEVICE_GROUP_COMMAND_BUFFER_BEGIN_INFO: {
-                    safe_VkDeviceGroupCommandBufferBeginInfo *safe_struct = new safe_VkDeviceGroupCommandBufferBeginInfo;
-                    safe_struct->initialize(reinterpret_cast<const VkDeviceGroupCommandBufferBeginInfo *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT: {
-                    safe_VkSampleLocationsInfoEXT *safe_struct = new safe_VkSampleLocationsInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkSampleLocationsInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_DEVICE_GROUP_RENDER_PASS_BEGIN_INFO: {
-                    safe_VkDeviceGroupRenderPassBeginInfo *safe_struct = new safe_VkDeviceGroupRenderPassBeginInfo;
-                    safe_struct->initialize(reinterpret_cast<const VkDeviceGroupRenderPassBeginInfo *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
                 } break;
 
             case VK_STRUCTURE_TYPE_RENDER_PASS_ATTACHMENT_BEGIN_INFO_KHR: {
-                    safe_VkRenderPassAttachmentBeginInfoKHR *safe_struct = new safe_VkRenderPassAttachmentBeginInfoKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkRenderPassAttachmentBeginInfoKHR *>(cur_pnext));
+                    safe_VkRenderPassAttachmentBeginInfoKHR *safe_struct = reinterpret_cast<safe_VkRenderPassAttachmentBeginInfoKHR *>(cur_pnext);
                     if (safe_struct->pAttachments) {
                         for (uint32_t index0 = 0; index0 < safe_struct->attachmentCount; ++index0) {
                             safe_struct->pAttachments[index0] = layer_data->Unwrap(safe_struct->pAttachments[index0]);
                         }
                     }
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_RENDER_PASS_SAMPLE_LOCATIONS_BEGIN_INFO_EXT: {
-                    safe_VkRenderPassSampleLocationsBeginInfoEXT *safe_struct = new safe_VkRenderPassSampleLocationsBeginInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkRenderPassSampleLocationsBeginInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_BIND_BUFFER_MEMORY_DEVICE_GROUP_INFO: {
-                    safe_VkBindBufferMemoryDeviceGroupInfo *safe_struct = new safe_VkBindBufferMemoryDeviceGroupInfo;
-                    safe_struct->initialize(reinterpret_cast<const VkBindBufferMemoryDeviceGroupInfo *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_DEVICE_GROUP_INFO: {
-                    safe_VkBindImageMemoryDeviceGroupInfo *safe_struct = new safe_VkBindImageMemoryDeviceGroupInfo;
-                    safe_struct->initialize(reinterpret_cast<const VkBindImageMemoryDeviceGroupInfo *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
                 } break;
 
             case VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_SWAPCHAIN_INFO_KHR: {
-                    safe_VkBindImageMemorySwapchainInfoKHR *safe_struct = new safe_VkBindImageMemorySwapchainInfoKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkBindImageMemorySwapchainInfoKHR *>(cur_pnext));
+                    safe_VkBindImageMemorySwapchainInfoKHR *safe_struct = reinterpret_cast<safe_VkBindImageMemorySwapchainInfoKHR *>(cur_pnext);
                     if (safe_struct->swapchain) {
                         safe_struct->swapchain = layer_data->Unwrap(safe_struct->swapchain);
                     }
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
                 } break;
-
-            case VK_STRUCTURE_TYPE_BIND_IMAGE_PLANE_MEMORY_INFO: {
-                    safe_VkBindImagePlaneMemoryInfo *safe_struct = new safe_VkBindImagePlaneMemoryInfo;
-                    safe_struct->initialize(reinterpret_cast<const VkBindImagePlaneMemoryInfo *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_IMAGE_PLANE_MEMORY_REQUIREMENTS_INFO: {
-                    safe_VkImagePlaneMemoryRequirementsInfo *safe_struct = new safe_VkImagePlaneMemoryRequirementsInfo;
-                    safe_struct->initialize(reinterpret_cast<const VkImagePlaneMemoryRequirementsInfo *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS: {
-                    safe_VkMemoryDedicatedRequirements *safe_struct = new safe_VkMemoryDedicatedRequirements;
-                    safe_struct->initialize(reinterpret_cast<const VkMemoryDedicatedRequirements *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BLEND_OPERATION_ADVANCED_PROPERTIES_EXT: {
-                    safe_VkPhysicalDeviceBlendOperationAdvancedPropertiesEXT *safe_struct = new safe_VkPhysicalDeviceBlendOperationAdvancedPropertiesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceBlendOperationAdvancedPropertiesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CONSERVATIVE_RASTERIZATION_PROPERTIES_EXT: {
-                    safe_VkPhysicalDeviceConservativeRasterizationPropertiesEXT *safe_struct = new safe_VkPhysicalDeviceConservativeRasterizationPropertiesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceConservativeRasterizationPropertiesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_PROPERTIES_NV: {
-                    safe_VkPhysicalDeviceCooperativeMatrixPropertiesNV *safe_struct = new safe_VkPhysicalDeviceCooperativeMatrixPropertiesNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceCooperativeMatrixPropertiesNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_STENCIL_RESOLVE_PROPERTIES_KHR: {
-                    safe_VkPhysicalDeviceDepthStencilResolvePropertiesKHR *safe_struct = new safe_VkPhysicalDeviceDepthStencilResolvePropertiesKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceDepthStencilResolvePropertiesKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES_EXT: {
-                    safe_VkPhysicalDeviceDescriptorIndexingPropertiesEXT *safe_struct = new safe_VkPhysicalDeviceDescriptorIndexingPropertiesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceDescriptorIndexingPropertiesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DISCARD_RECTANGLE_PROPERTIES_EXT: {
-                    safe_VkPhysicalDeviceDiscardRectanglePropertiesEXT *safe_struct = new safe_VkPhysicalDeviceDiscardRectanglePropertiesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceDiscardRectanglePropertiesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES_KHR: {
-                    safe_VkPhysicalDeviceDriverPropertiesKHR *safe_struct = new safe_VkPhysicalDeviceDriverPropertiesKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceDriverPropertiesKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT: {
-                    safe_VkPhysicalDeviceExternalMemoryHostPropertiesEXT *safe_struct = new safe_VkPhysicalDeviceExternalMemoryHostPropertiesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceExternalMemoryHostPropertiesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES_KHR: {
-                    safe_VkPhysicalDeviceFloatControlsPropertiesKHR *safe_struct = new safe_VkPhysicalDeviceFloatControlsPropertiesKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceFloatControlsPropertiesKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_PROPERTIES_EXT: {
-                    safe_VkPhysicalDeviceFragmentDensityMapPropertiesEXT *safe_struct = new safe_VkPhysicalDeviceFragmentDensityMapPropertiesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceFragmentDensityMapPropertiesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES: {
-                    safe_VkPhysicalDeviceIDProperties *safe_struct = new safe_VkPhysicalDeviceIDProperties;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceIDProperties *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INLINE_UNIFORM_BLOCK_PROPERTIES_EXT: {
-                    safe_VkPhysicalDeviceInlineUniformBlockPropertiesEXT *safe_struct = new safe_VkPhysicalDeviceInlineUniformBlockPropertiesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceInlineUniformBlockPropertiesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES: {
-                    safe_VkPhysicalDeviceMaintenance3Properties *safe_struct = new safe_VkPhysicalDeviceMaintenance3Properties;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceMaintenance3Properties *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_PROPERTIES_NV: {
-                    safe_VkPhysicalDeviceMeshShaderPropertiesNV *safe_struct = new safe_VkPhysicalDeviceMeshShaderPropertiesNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceMeshShaderPropertiesNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_PER_VIEW_ATTRIBUTES_PROPERTIES_NVX: {
-                    safe_VkPhysicalDeviceMultiviewPerViewAttributesPropertiesNVX *safe_struct = new safe_VkPhysicalDeviceMultiviewPerViewAttributesPropertiesNVX;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceMultiviewPerViewAttributesPropertiesNVX *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_PROPERTIES: {
-                    safe_VkPhysicalDeviceMultiviewProperties *safe_struct = new safe_VkPhysicalDeviceMultiviewProperties;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceMultiviewProperties *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PCI_BUS_INFO_PROPERTIES_EXT: {
-                    safe_VkPhysicalDevicePCIBusInfoPropertiesEXT *safe_struct = new safe_VkPhysicalDevicePCIBusInfoPropertiesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDevicePCIBusInfoPropertiesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_POINT_CLIPPING_PROPERTIES: {
-                    safe_VkPhysicalDevicePointClippingProperties *safe_struct = new safe_VkPhysicalDevicePointClippingProperties;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDevicePointClippingProperties *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_PROPERTIES: {
-                    safe_VkPhysicalDeviceProtectedMemoryProperties *safe_struct = new safe_VkPhysicalDeviceProtectedMemoryProperties;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceProtectedMemoryProperties *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PUSH_DESCRIPTOR_PROPERTIES_KHR: {
-                    safe_VkPhysicalDevicePushDescriptorPropertiesKHR *safe_struct = new safe_VkPhysicalDevicePushDescriptorPropertiesKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDevicePushDescriptorPropertiesKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PROPERTIES_NV: {
-                    safe_VkPhysicalDeviceRayTracingPropertiesNV *safe_struct = new safe_VkPhysicalDeviceRayTracingPropertiesNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceRayTracingPropertiesNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLE_LOCATIONS_PROPERTIES_EXT: {
-                    safe_VkPhysicalDeviceSampleLocationsPropertiesEXT *safe_struct = new safe_VkPhysicalDeviceSampleLocationsPropertiesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceSampleLocationsPropertiesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_FILTER_MINMAX_PROPERTIES_EXT: {
-                    safe_VkPhysicalDeviceSamplerFilterMinmaxPropertiesEXT *safe_struct = new safe_VkPhysicalDeviceSamplerFilterMinmaxPropertiesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceSamplerFilterMinmaxPropertiesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CORE_PROPERTIES_AMD: {
-                    safe_VkPhysicalDeviceShaderCorePropertiesAMD *safe_struct = new safe_VkPhysicalDeviceShaderCorePropertiesAMD;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceShaderCorePropertiesAMD *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SM_BUILTINS_PROPERTIES_NV: {
-                    safe_VkPhysicalDeviceShaderSMBuiltinsPropertiesNV *safe_struct = new safe_VkPhysicalDeviceShaderSMBuiltinsPropertiesNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceShaderSMBuiltinsPropertiesNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADING_RATE_IMAGE_PROPERTIES_NV: {
-                    safe_VkPhysicalDeviceShadingRateImagePropertiesNV *safe_struct = new safe_VkPhysicalDeviceShadingRateImagePropertiesNV;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceShadingRateImagePropertiesNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES: {
-                    safe_VkPhysicalDeviceSubgroupProperties *safe_struct = new safe_VkPhysicalDeviceSubgroupProperties;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceSubgroupProperties *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_PROPERTIES_EXT: {
-                    safe_VkPhysicalDeviceTransformFeedbackPropertiesEXT *safe_struct = new safe_VkPhysicalDeviceTransformFeedbackPropertiesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceTransformFeedbackPropertiesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_PROPERTIES_EXT: {
-                    safe_VkPhysicalDeviceVertexAttributeDivisorPropertiesEXT *safe_struct = new safe_VkPhysicalDeviceVertexAttributeDivisorPropertiesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceVertexAttributeDivisorPropertiesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT: {
-                    safe_VkDrmFormatModifierPropertiesListEXT *safe_struct = new safe_VkDrmFormatModifierPropertiesListEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkDrmFormatModifierPropertiesListEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-#ifdef VK_USE_PLATFORM_ANDROID_KHR 
-            case VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_USAGE_ANDROID: {
-                    safe_VkAndroidHardwareBufferUsageANDROID *safe_struct = new safe_VkAndroidHardwareBufferUsageANDROID;
-                    safe_struct->initialize(reinterpret_cast<const VkAndroidHardwareBufferUsageANDROID *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-#endif // VK_USE_PLATFORM_ANDROID_KHR 
-
-            case VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES: {
-                    safe_VkExternalImageFormatProperties *safe_struct = new safe_VkExternalImageFormatProperties;
-                    safe_struct->initialize(reinterpret_cast<const VkExternalImageFormatProperties *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_FILTER_CUBIC_IMAGE_VIEW_IMAGE_FORMAT_PROPERTIES_EXT: {
-                    safe_VkFilterCubicImageViewImageFormatPropertiesEXT *safe_struct = new safe_VkFilterCubicImageViewImageFormatPropertiesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkFilterCubicImageViewImageFormatPropertiesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_IMAGE_FORMAT_PROPERTIES: {
-                    safe_VkSamplerYcbcrConversionImageFormatProperties *safe_struct = new safe_VkSamplerYcbcrConversionImageFormatProperties;
-                    safe_struct->initialize(reinterpret_cast<const VkSamplerYcbcrConversionImageFormatProperties *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_TEXTURE_LOD_GATHER_FORMAT_PROPERTIES_AMD: {
-                    safe_VkTextureLODGatherFormatPropertiesAMD *safe_struct = new safe_VkTextureLODGatherFormatPropertiesAMD;
-                    safe_struct->initialize(reinterpret_cast<const VkTextureLODGatherFormatPropertiesAMD *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO: {
-                    safe_VkPhysicalDeviceExternalImageFormatInfo *safe_struct = new safe_VkPhysicalDeviceExternalImageFormatInfo;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceExternalImageFormatInfo *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_DRM_FORMAT_MODIFIER_INFO_EXT: {
-                    safe_VkPhysicalDeviceImageDrmFormatModifierInfoEXT *safe_struct = new safe_VkPhysicalDeviceImageDrmFormatModifierInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceImageDrmFormatModifierInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_VIEW_IMAGE_FORMAT_INFO_EXT: {
-                    safe_VkPhysicalDeviceImageViewImageFormatInfoEXT *safe_struct = new safe_VkPhysicalDeviceImageViewImageFormatInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceImageViewImageFormatInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_QUEUE_FAMILY_CHECKPOINT_PROPERTIES_NV: {
-                    safe_VkQueueFamilyCheckpointPropertiesNV *safe_struct = new safe_VkQueueFamilyCheckpointPropertiesNV;
-                    safe_struct->initialize(reinterpret_cast<const VkQueueFamilyCheckpointPropertiesNV *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT: {
-                    safe_VkPhysicalDeviceMemoryBudgetPropertiesEXT *safe_struct = new safe_VkPhysicalDeviceMemoryBudgetPropertiesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceMemoryBudgetPropertiesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXEL_BUFFER_ALIGNMENT_PROPERTIES_EXT: {
-                    safe_VkPhysicalDeviceTexelBufferAlignmentPropertiesEXT *safe_struct = new safe_VkPhysicalDeviceTexelBufferAlignmentPropertiesEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkPhysicalDeviceTexelBufferAlignmentPropertiesEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_LAYOUT_SUPPORT_EXT: {
-                    safe_VkDescriptorSetVariableDescriptorCountLayoutSupportEXT *safe_struct = new safe_VkDescriptorSetVariableDescriptorCountLayoutSupportEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkDescriptorSetVariableDescriptorCountLayoutSupportEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_DEVICE_GROUP_SWAPCHAIN_CREATE_INFO_KHR: {
-                    safe_VkDeviceGroupSwapchainCreateInfoKHR *safe_struct = new safe_VkDeviceGroupSwapchainCreateInfoKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkDeviceGroupSwapchainCreateInfoKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR 
-            case VK_STRUCTURE_TYPE_SURFACE_FULL_SCREEN_EXCLUSIVE_INFO_EXT: {
-                    safe_VkSurfaceFullScreenExclusiveInfoEXT *safe_struct = new safe_VkSurfaceFullScreenExclusiveInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkSurfaceFullScreenExclusiveInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-#endif // VK_USE_PLATFORM_WIN32_KHR 
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR 
-            case VK_STRUCTURE_TYPE_SURFACE_FULL_SCREEN_EXCLUSIVE_WIN32_INFO_EXT: {
-                    safe_VkSurfaceFullScreenExclusiveWin32InfoEXT *safe_struct = new safe_VkSurfaceFullScreenExclusiveWin32InfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkSurfaceFullScreenExclusiveWin32InfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-#endif // VK_USE_PLATFORM_WIN32_KHR 
-
-            case VK_STRUCTURE_TYPE_SWAPCHAIN_COUNTER_CREATE_INFO_EXT: {
-                    safe_VkSwapchainCounterCreateInfoEXT *safe_struct = new safe_VkSwapchainCounterCreateInfoEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkSwapchainCounterCreateInfoEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_SWAPCHAIN_DISPLAY_NATIVE_HDR_CREATE_INFO_AMD: {
-                    safe_VkSwapchainDisplayNativeHdrCreateInfoAMD *safe_struct = new safe_VkSwapchainDisplayNativeHdrCreateInfoAMD;
-                    safe_struct->initialize(reinterpret_cast<const VkSwapchainDisplayNativeHdrCreateInfoAMD *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_DEVICE_GROUP_PRESENT_INFO_KHR: {
-                    safe_VkDeviceGroupPresentInfoKHR *safe_struct = new safe_VkDeviceGroupPresentInfoKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkDeviceGroupPresentInfoKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_DISPLAY_PRESENT_INFO_KHR: {
-                    safe_VkDisplayPresentInfoKHR *safe_struct = new safe_VkDisplayPresentInfoKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkDisplayPresentInfoKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-#ifdef VK_USE_PLATFORM_GGP 
-            case VK_STRUCTURE_TYPE_PRESENT_FRAME_TOKEN_GGP: {
-                    safe_VkPresentFrameTokenGGP *safe_struct = new safe_VkPresentFrameTokenGGP;
-                    safe_struct->initialize(reinterpret_cast<const VkPresentFrameTokenGGP *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-#endif // VK_USE_PLATFORM_GGP 
-
-            case VK_STRUCTURE_TYPE_PRESENT_REGIONS_KHR: {
-                    safe_VkPresentRegionsKHR *safe_struct = new safe_VkPresentRegionsKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkPresentRegionsKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE: {
-                    safe_VkPresentTimesInfoGOOGLE *safe_struct = new safe_VkPresentTimesInfoGOOGLE;
-                    safe_struct->initialize(reinterpret_cast<const VkPresentTimesInfoGOOGLE *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE_KHR: {
-                    safe_VkSubpassDescriptionDepthStencilResolveKHR *safe_struct = new safe_VkSubpassDescriptionDepthStencilResolveKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkSubpassDescriptionDepthStencilResolveKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_DISPLAY_NATIVE_HDR_SURFACE_CAPABILITIES_AMD: {
-                    safe_VkDisplayNativeHdrSurfaceCapabilitiesAMD *safe_struct = new safe_VkDisplayNativeHdrSurfaceCapabilitiesAMD;
-                    safe_struct->initialize(reinterpret_cast<const VkDisplayNativeHdrSurfaceCapabilitiesAMD *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-            case VK_STRUCTURE_TYPE_SHARED_PRESENT_SURFACE_CAPABILITIES_KHR: {
-                    safe_VkSharedPresentSurfaceCapabilitiesKHR *safe_struct = new safe_VkSharedPresentSurfaceCapabilitiesKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkSharedPresentSurfaceCapabilitiesKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR 
-            case VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES_FULL_SCREEN_EXCLUSIVE_EXT: {
-                    safe_VkSurfaceCapabilitiesFullScreenExclusiveEXT *safe_struct = new safe_VkSurfaceCapabilitiesFullScreenExclusiveEXT;
-                    safe_struct->initialize(reinterpret_cast<const VkSurfaceCapabilitiesFullScreenExclusiveEXT *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-#endif // VK_USE_PLATFORM_WIN32_KHR 
-
-            case VK_STRUCTURE_TYPE_SURFACE_PROTECTED_CAPABILITIES_KHR: {
-                    safe_VkSurfaceProtectedCapabilitiesKHR *safe_struct = new safe_VkSurfaceProtectedCapabilitiesKHR;
-                    safe_struct->initialize(reinterpret_cast<const VkSurfaceProtectedCapabilitiesKHR *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-
-#ifdef VK_USE_PLATFORM_ANDROID_KHR 
-            case VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID: {
-                    safe_VkAndroidHardwareBufferFormatPropertiesANDROID *safe_struct = new safe_VkAndroidHardwareBufferFormatPropertiesANDROID;
-                    safe_struct->initialize(reinterpret_cast<const VkAndroidHardwareBufferFormatPropertiesANDROID *>(cur_pnext));
-                    cur_ext_struct = reinterpret_cast<void *>(safe_struct);
-                } break;
-#endif // VK_USE_PLATFORM_ANDROID_KHR 
 
             default:
                 break;
         }
-
-        // Save pointer to the first structure in the pNext chain
-        head_pnext = (head_pnext ? head_pnext : cur_ext_struct);
-
-        // For any extension structure but the first, link the last struct's pNext to the current ext struct
-        if (prev_ext_struct) {
-                reinterpret_cast<VkBaseOutStructure *>(prev_ext_struct)->pNext = reinterpret_cast<VkBaseOutStructure *>(cur_ext_struct);
-        }
-        prev_ext_struct = cur_ext_struct;
 
         // Process the next structure in the chain
         cur_pnext = header->pNext;
-    }
-    return head_pnext;
-}
-
-// Free a pNext extension chain
-void FreeUnwrappedExtensionStructs(void *head) {
-    VkBaseOutStructure *curr_ptr = reinterpret_cast<VkBaseOutStructure *>(head);
-    while (curr_ptr) {
-        VkBaseOutStructure *header = curr_ptr;
-        curr_ptr = reinterpret_cast<VkBaseOutStructure *>(header->pNext);
-
-        switch (header->sType) {
-            case VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT:
-                delete reinterpret_cast<safe_VkDebugReportCallbackCreateInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT:
-                delete reinterpret_cast<safe_VkDebugUtilsMessengerCreateInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT:
-                delete reinterpret_cast<safe_VkValidationFeaturesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_VALIDATION_FLAGS_EXT:
-                delete reinterpret_cast<safe_VkValidationFlagsEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_DEVICE_QUEUE_GLOBAL_PRIORITY_CREATE_INFO_EXT:
-                delete reinterpret_cast<safe_VkDeviceQueueGlobalPriorityCreateInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_DEVICE_GROUP_DEVICE_CREATE_INFO:
-                delete reinterpret_cast<safe_VkDeviceGroupDeviceCreateInfo *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_DEVICE_MEMORY_OVERALLOCATION_CREATE_INFO_AMD:
-                delete reinterpret_cast<safe_VkDeviceMemoryOverallocationCreateInfoAMD *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES:
-                delete reinterpret_cast<safe_VkPhysicalDevice16BitStorageFeatures *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES_KHR:
-                delete reinterpret_cast<safe_VkPhysicalDevice8BitStorageFeaturesKHR *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ASTC_DECODE_FEATURES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceASTCDecodeFeaturesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BLEND_OPERATION_ADVANCED_FEATURES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceBlendOperationAdvancedFeaturesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceBufferDeviceAddressFeaturesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_NV:
-                delete reinterpret_cast<safe_VkPhysicalDeviceComputeShaderDerivativesFeaturesNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CONDITIONAL_RENDERING_FEATURES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceConditionalRenderingFeaturesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_NV:
-                delete reinterpret_cast<safe_VkPhysicalDeviceCooperativeMatrixFeaturesNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CORNER_SAMPLED_IMAGE_FEATURES_NV:
-                delete reinterpret_cast<safe_VkPhysicalDeviceCornerSampledImageFeaturesNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COVERAGE_REDUCTION_MODE_FEATURES_NV:
-                delete reinterpret_cast<safe_VkPhysicalDeviceCoverageReductionModeFeaturesNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEDICATED_ALLOCATION_IMAGE_ALIASING_FEATURES_NV:
-                delete reinterpret_cast<safe_VkPhysicalDeviceDedicatedAllocationImageAliasingFeaturesNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_ENABLE_FEATURES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceDepthClipEnableFeaturesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceDescriptorIndexingFeaturesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXCLUSIVE_SCISSOR_FEATURES_NV:
-                delete reinterpret_cast<safe_VkPhysicalDeviceExclusiveScissorFeaturesNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2:
-                delete reinterpret_cast<safe_VkPhysicalDeviceFeatures2 *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT16_INT8_FEATURES_KHR:
-                delete reinterpret_cast<safe_VkPhysicalDeviceFloat16Int8FeaturesKHR *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_FEATURES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceFragmentDensityMapFeaturesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_NV:
-                delete reinterpret_cast<safe_VkPhysicalDeviceFragmentShaderBarycentricFeaturesNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_INTERLOCK_FEATURES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceFragmentShaderInterlockFeaturesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceHostQueryResetFeaturesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGELESS_FRAMEBUFFER_FEATURES_KHR:
-                delete reinterpret_cast<safe_VkPhysicalDeviceImagelessFramebufferFeaturesKHR *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INLINE_UNIFORM_BLOCK_FEATURES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceInlineUniformBlockFeaturesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceMemoryPriorityFeaturesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_NV:
-                delete reinterpret_cast<safe_VkPhysicalDeviceMeshShaderFeaturesNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES:
-                delete reinterpret_cast<safe_VkPhysicalDeviceMultiviewFeatures *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_FEATURES:
-                delete reinterpret_cast<safe_VkPhysicalDeviceProtectedMemoryFeatures *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_REPRESENTATIVE_FRAGMENT_TEST_FEATURES_NV:
-                delete reinterpret_cast<safe_VkPhysicalDeviceRepresentativeFragmentTestFeaturesNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES:
-                delete reinterpret_cast<safe_VkPhysicalDeviceSamplerYcbcrConversionFeatures *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceScalarBlockLayoutFeaturesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES_KHR:
-                delete reinterpret_cast<safe_VkPhysicalDeviceShaderAtomicInt64FeaturesKHR *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES:
-                delete reinterpret_cast<safe_VkPhysicalDeviceShaderDrawParametersFeatures *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_IMAGE_FOOTPRINT_FEATURES_NV:
-                delete reinterpret_cast<safe_VkPhysicalDeviceShaderImageFootprintFeaturesNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_FUNCTIONS2_FEATURES_INTEL:
-                delete reinterpret_cast<safe_VkPhysicalDeviceShaderIntegerFunctions2INTEL *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SM_BUILTINS_FEATURES_NV:
-                delete reinterpret_cast<safe_VkPhysicalDeviceShaderSMBuiltinsFeaturesNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADING_RATE_IMAGE_FEATURES_NV:
-                delete reinterpret_cast<safe_VkPhysicalDeviceShadingRateImageFeaturesNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXEL_BUFFER_ALIGNMENT_FEATURES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceTexelBufferAlignmentFeaturesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceTransformFeedbackFeaturesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFORM_BUFFER_STANDARD_LAYOUT_FEATURES_KHR:
-                delete reinterpret_cast<safe_VkPhysicalDeviceUniformBufferStandardLayoutFeaturesKHR *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES:
-                delete reinterpret_cast<safe_VkPhysicalDeviceVariablePointersFeatures *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES_KHR:
-                delete reinterpret_cast<safe_VkPhysicalDeviceVulkanMemoryModelFeaturesKHR *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_YCBCR_IMAGE_ARRAYS_FEATURES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceYcbcrImageArraysFeaturesEXT *>(header);
-                break;
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR 
-            case VK_STRUCTURE_TYPE_D3D12_FENCE_SUBMIT_INFO_KHR:
-                delete reinterpret_cast<safe_VkD3D12FenceSubmitInfoKHR *>(header);
-                break;
-#endif // VK_USE_PLATFORM_WIN32_KHR 
-
-            case VK_STRUCTURE_TYPE_DEVICE_GROUP_SUBMIT_INFO:
-                delete reinterpret_cast<safe_VkDeviceGroupSubmitInfo *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PROTECTED_SUBMIT_INFO:
-                delete reinterpret_cast<safe_VkProtectedSubmitInfo *>(header);
-                break;
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR 
-            case VK_STRUCTURE_TYPE_WIN32_KEYED_MUTEX_ACQUIRE_RELEASE_INFO_KHR:
-                delete reinterpret_cast<safe_VkWin32KeyedMutexAcquireReleaseInfoKHR *>(header);
-                break;
-#endif // VK_USE_PLATFORM_WIN32_KHR 
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR 
-            case VK_STRUCTURE_TYPE_WIN32_KEYED_MUTEX_ACQUIRE_RELEASE_INFO_NV:
-                delete reinterpret_cast<safe_VkWin32KeyedMutexAcquireReleaseInfoNV *>(header);
-                break;
-#endif // VK_USE_PLATFORM_WIN32_KHR 
-
-            case VK_STRUCTURE_TYPE_DEDICATED_ALLOCATION_MEMORY_ALLOCATE_INFO_NV:
-                delete reinterpret_cast<safe_VkDedicatedAllocationMemoryAllocateInfoNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO:
-                delete reinterpret_cast<safe_VkExportMemoryAllocateInfo *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO_NV:
-                delete reinterpret_cast<safe_VkExportMemoryAllocateInfoNV *>(header);
-                break;
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR 
-            case VK_STRUCTURE_TYPE_EXPORT_MEMORY_WIN32_HANDLE_INFO_KHR:
-                delete reinterpret_cast<safe_VkExportMemoryWin32HandleInfoKHR *>(header);
-                break;
-#endif // VK_USE_PLATFORM_WIN32_KHR 
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR 
-            case VK_STRUCTURE_TYPE_EXPORT_MEMORY_WIN32_HANDLE_INFO_NV:
-                delete reinterpret_cast<safe_VkExportMemoryWin32HandleInfoNV *>(header);
-                break;
-#endif // VK_USE_PLATFORM_WIN32_KHR 
-
-#ifdef VK_USE_PLATFORM_ANDROID_KHR 
-            case VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID:
-                delete reinterpret_cast<safe_VkImportAndroidHardwareBufferInfoANDROID *>(header);
-                break;
-#endif // VK_USE_PLATFORM_ANDROID_KHR 
-
-            case VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR:
-                delete reinterpret_cast<safe_VkImportMemoryFdInfoKHR *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT:
-                delete reinterpret_cast<safe_VkImportMemoryHostPointerInfoEXT *>(header);
-                break;
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR 
-            case VK_STRUCTURE_TYPE_IMPORT_MEMORY_WIN32_HANDLE_INFO_KHR:
-                delete reinterpret_cast<safe_VkImportMemoryWin32HandleInfoKHR *>(header);
-                break;
-#endif // VK_USE_PLATFORM_WIN32_KHR 
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR 
-            case VK_STRUCTURE_TYPE_IMPORT_MEMORY_WIN32_HANDLE_INFO_NV:
-                delete reinterpret_cast<safe_VkImportMemoryWin32HandleInfoNV *>(header);
-                break;
-#endif // VK_USE_PLATFORM_WIN32_KHR 
-
-            case VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO:
-                delete reinterpret_cast<safe_VkMemoryAllocateFlagsInfo *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO:
-                delete reinterpret_cast<safe_VkMemoryDedicatedAllocateInfo *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_MEMORY_PRIORITY_ALLOCATE_INFO_EXT:
-                delete reinterpret_cast<safe_VkMemoryPriorityAllocateInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_DEVICE_GROUP_BIND_SPARSE_INFO:
-                delete reinterpret_cast<safe_VkDeviceGroupBindSparseInfo *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_EXPORT_FENCE_CREATE_INFO:
-                delete reinterpret_cast<safe_VkExportFenceCreateInfo *>(header);
-                break;
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR 
-            case VK_STRUCTURE_TYPE_EXPORT_FENCE_WIN32_HANDLE_INFO_KHR:
-                delete reinterpret_cast<safe_VkExportFenceWin32HandleInfoKHR *>(header);
-                break;
-#endif // VK_USE_PLATFORM_WIN32_KHR 
-
-            case VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO:
-                delete reinterpret_cast<safe_VkExportSemaphoreCreateInfo *>(header);
-                break;
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR 
-            case VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_WIN32_HANDLE_INFO_KHR:
-                delete reinterpret_cast<safe_VkExportSemaphoreWin32HandleInfoKHR *>(header);
-                break;
-#endif // VK_USE_PLATFORM_WIN32_KHR 
-
-            case VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_CREATE_INFO_EXT:
-                delete reinterpret_cast<safe_VkBufferDeviceAddressCreateInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_DEDICATED_ALLOCATION_BUFFER_CREATE_INFO_NV:
-                delete reinterpret_cast<safe_VkDedicatedAllocationBufferCreateInfoNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO:
-                delete reinterpret_cast<safe_VkExternalMemoryBufferCreateInfo *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_DEDICATED_ALLOCATION_IMAGE_CREATE_INFO_NV:
-                delete reinterpret_cast<safe_VkDedicatedAllocationImageCreateInfoNV *>(header);
-                break;
-
-#ifdef VK_USE_PLATFORM_ANDROID_KHR 
-            case VK_STRUCTURE_TYPE_EXTERNAL_FORMAT_ANDROID:
-                delete reinterpret_cast<safe_VkExternalFormatANDROID *>(header);
-                break;
-#endif // VK_USE_PLATFORM_ANDROID_KHR 
-
-            case VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO:
-                delete reinterpret_cast<safe_VkExternalMemoryImageCreateInfo *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO_NV:
-                delete reinterpret_cast<safe_VkExternalMemoryImageCreateInfoNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT:
-                delete reinterpret_cast<safe_VkImageDrmFormatModifierExplicitCreateInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_LIST_CREATE_INFO_EXT:
-                delete reinterpret_cast<safe_VkImageDrmFormatModifierListCreateInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO_KHR:
-                delete reinterpret_cast<safe_VkImageFormatListCreateInfoKHR *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_IMAGE_STENCIL_USAGE_CREATE_INFO_EXT:
-                delete reinterpret_cast<safe_VkImageStencilUsageCreateInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_IMAGE_SWAPCHAIN_CREATE_INFO_KHR:
-                delete reinterpret_cast<safe_VkImageSwapchainCreateInfoKHR *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_IMAGE_VIEW_ASTC_DECODE_MODE_EXT:
-                delete reinterpret_cast<safe_VkImageViewASTCDecodeModeEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO:
-                delete reinterpret_cast<safe_VkImageViewUsageCreateInfo *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO:
-                delete reinterpret_cast<safe_VkSamplerYcbcrConversionInfo *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_SHADER_MODULE_VALIDATION_CACHE_CREATE_INFO_EXT:
-                delete reinterpret_cast<safe_VkShaderModuleValidationCacheCreateInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT:
-                delete reinterpret_cast<safe_VkPipelineVertexInputDivisorStateCreateInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_DOMAIN_ORIGIN_STATE_CREATE_INFO:
-                delete reinterpret_cast<safe_VkPipelineTessellationDomainOriginStateCreateInfo *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_COARSE_SAMPLE_ORDER_STATE_CREATE_INFO_NV:
-                delete reinterpret_cast<safe_VkPipelineViewportCoarseSampleOrderStateCreateInfoNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_EXCLUSIVE_SCISSOR_STATE_CREATE_INFO_NV:
-                delete reinterpret_cast<safe_VkPipelineViewportExclusiveScissorStateCreateInfoNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_SHADING_RATE_IMAGE_STATE_CREATE_INFO_NV:
-                delete reinterpret_cast<safe_VkPipelineViewportShadingRateImageStateCreateInfoNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_SWIZZLE_STATE_CREATE_INFO_NV:
-                delete reinterpret_cast<safe_VkPipelineViewportSwizzleStateCreateInfoNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_W_SCALING_STATE_CREATE_INFO_NV:
-                delete reinterpret_cast<safe_VkPipelineViewportWScalingStateCreateInfoNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_CONSERVATIVE_STATE_CREATE_INFO_EXT:
-                delete reinterpret_cast<safe_VkPipelineRasterizationConservativeStateCreateInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_DEPTH_CLIP_STATE_CREATE_INFO_EXT:
-                delete reinterpret_cast<safe_VkPipelineRasterizationDepthClipStateCreateInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_RASTERIZATION_ORDER_AMD:
-                delete reinterpret_cast<safe_VkPipelineRasterizationStateRasterizationOrderAMD *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_STREAM_CREATE_INFO_EXT:
-                delete reinterpret_cast<safe_VkPipelineRasterizationStateStreamCreateInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_COVERAGE_MODULATION_STATE_CREATE_INFO_NV:
-                delete reinterpret_cast<safe_VkPipelineCoverageModulationStateCreateInfoNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_COVERAGE_REDUCTION_STATE_CREATE_INFO_NV:
-                delete reinterpret_cast<safe_VkPipelineCoverageReductionStateCreateInfoNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_COVERAGE_TO_COLOR_STATE_CREATE_INFO_NV:
-                delete reinterpret_cast<safe_VkPipelineCoverageToColorStateCreateInfoNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_SAMPLE_LOCATIONS_STATE_CREATE_INFO_EXT:
-                delete reinterpret_cast<safe_VkPipelineSampleLocationsStateCreateInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_ADVANCED_STATE_CREATE_INFO_EXT:
-                delete reinterpret_cast<safe_VkPipelineColorBlendAdvancedStateCreateInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO_EXT:
-                delete reinterpret_cast<safe_VkPipelineCreationFeedbackCreateInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_DISCARD_RECTANGLE_STATE_CREATE_INFO_EXT:
-                delete reinterpret_cast<safe_VkPipelineDiscardRectangleStateCreateInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PIPELINE_REPRESENTATIVE_FRAGMENT_TEST_STATE_CREATE_INFO_NV:
-                delete reinterpret_cast<safe_VkPipelineRepresentativeFragmentTestStateCreateInfoNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO_EXT:
-                delete reinterpret_cast<safe_VkSamplerReductionModeCreateInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT:
-                delete reinterpret_cast<safe_VkDescriptorSetLayoutBindingFlagsCreateInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_INLINE_UNIFORM_BLOCK_CREATE_INFO_EXT:
-                delete reinterpret_cast<safe_VkDescriptorPoolInlineUniformBlockCreateInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT:
-                delete reinterpret_cast<safe_VkDescriptorSetVariableDescriptorCountAllocateInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_NV:
-                delete reinterpret_cast<safe_VkWriteDescriptorSetAccelerationStructureNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_INLINE_UNIFORM_BLOCK_EXT:
-                delete reinterpret_cast<safe_VkWriteDescriptorSetInlineUniformBlockEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_FRAMEBUFFER_ATTACHMENTS_CREATE_INFO_KHR:
-                delete reinterpret_cast<safe_VkFramebufferAttachmentsCreateInfoKHR *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_RENDER_PASS_FRAGMENT_DENSITY_MAP_CREATE_INFO_EXT:
-                delete reinterpret_cast<safe_VkRenderPassFragmentDensityMapCreateInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_RENDER_PASS_INPUT_ATTACHMENT_ASPECT_CREATE_INFO:
-                delete reinterpret_cast<safe_VkRenderPassInputAttachmentAspectCreateInfo *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO:
-                delete reinterpret_cast<safe_VkRenderPassMultiviewCreateInfo *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_CONDITIONAL_RENDERING_INFO_EXT:
-                delete reinterpret_cast<safe_VkCommandBufferInheritanceConditionalRenderingInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_DEVICE_GROUP_COMMAND_BUFFER_BEGIN_INFO:
-                delete reinterpret_cast<safe_VkDeviceGroupCommandBufferBeginInfo *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT:
-                delete reinterpret_cast<safe_VkSampleLocationsInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_DEVICE_GROUP_RENDER_PASS_BEGIN_INFO:
-                delete reinterpret_cast<safe_VkDeviceGroupRenderPassBeginInfo *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_RENDER_PASS_ATTACHMENT_BEGIN_INFO_KHR:
-                delete reinterpret_cast<safe_VkRenderPassAttachmentBeginInfoKHR *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_RENDER_PASS_SAMPLE_LOCATIONS_BEGIN_INFO_EXT:
-                delete reinterpret_cast<safe_VkRenderPassSampleLocationsBeginInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_BIND_BUFFER_MEMORY_DEVICE_GROUP_INFO:
-                delete reinterpret_cast<safe_VkBindBufferMemoryDeviceGroupInfo *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_DEVICE_GROUP_INFO:
-                delete reinterpret_cast<safe_VkBindImageMemoryDeviceGroupInfo *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_SWAPCHAIN_INFO_KHR:
-                delete reinterpret_cast<safe_VkBindImageMemorySwapchainInfoKHR *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_BIND_IMAGE_PLANE_MEMORY_INFO:
-                delete reinterpret_cast<safe_VkBindImagePlaneMemoryInfo *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_IMAGE_PLANE_MEMORY_REQUIREMENTS_INFO:
-                delete reinterpret_cast<safe_VkImagePlaneMemoryRequirementsInfo *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS:
-                delete reinterpret_cast<safe_VkMemoryDedicatedRequirements *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BLEND_OPERATION_ADVANCED_PROPERTIES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceBlendOperationAdvancedPropertiesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CONSERVATIVE_RASTERIZATION_PROPERTIES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceConservativeRasterizationPropertiesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_PROPERTIES_NV:
-                delete reinterpret_cast<safe_VkPhysicalDeviceCooperativeMatrixPropertiesNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_STENCIL_RESOLVE_PROPERTIES_KHR:
-                delete reinterpret_cast<safe_VkPhysicalDeviceDepthStencilResolvePropertiesKHR *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceDescriptorIndexingPropertiesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DISCARD_RECTANGLE_PROPERTIES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceDiscardRectanglePropertiesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES_KHR:
-                delete reinterpret_cast<safe_VkPhysicalDeviceDriverPropertiesKHR *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceExternalMemoryHostPropertiesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES_KHR:
-                delete reinterpret_cast<safe_VkPhysicalDeviceFloatControlsPropertiesKHR *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_PROPERTIES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceFragmentDensityMapPropertiesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES:
-                delete reinterpret_cast<safe_VkPhysicalDeviceIDProperties *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INLINE_UNIFORM_BLOCK_PROPERTIES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceInlineUniformBlockPropertiesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES:
-                delete reinterpret_cast<safe_VkPhysicalDeviceMaintenance3Properties *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_PROPERTIES_NV:
-                delete reinterpret_cast<safe_VkPhysicalDeviceMeshShaderPropertiesNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_PER_VIEW_ATTRIBUTES_PROPERTIES_NVX:
-                delete reinterpret_cast<safe_VkPhysicalDeviceMultiviewPerViewAttributesPropertiesNVX *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_PROPERTIES:
-                delete reinterpret_cast<safe_VkPhysicalDeviceMultiviewProperties *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PCI_BUS_INFO_PROPERTIES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDevicePCIBusInfoPropertiesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_POINT_CLIPPING_PROPERTIES:
-                delete reinterpret_cast<safe_VkPhysicalDevicePointClippingProperties *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_PROPERTIES:
-                delete reinterpret_cast<safe_VkPhysicalDeviceProtectedMemoryProperties *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PUSH_DESCRIPTOR_PROPERTIES_KHR:
-                delete reinterpret_cast<safe_VkPhysicalDevicePushDescriptorPropertiesKHR *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PROPERTIES_NV:
-                delete reinterpret_cast<safe_VkPhysicalDeviceRayTracingPropertiesNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLE_LOCATIONS_PROPERTIES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceSampleLocationsPropertiesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_FILTER_MINMAX_PROPERTIES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceSamplerFilterMinmaxPropertiesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CORE_PROPERTIES_AMD:
-                delete reinterpret_cast<safe_VkPhysicalDeviceShaderCorePropertiesAMD *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SM_BUILTINS_PROPERTIES_NV:
-                delete reinterpret_cast<safe_VkPhysicalDeviceShaderSMBuiltinsPropertiesNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADING_RATE_IMAGE_PROPERTIES_NV:
-                delete reinterpret_cast<safe_VkPhysicalDeviceShadingRateImagePropertiesNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES:
-                delete reinterpret_cast<safe_VkPhysicalDeviceSubgroupProperties *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_PROPERTIES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceTransformFeedbackPropertiesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_PROPERTIES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceVertexAttributeDivisorPropertiesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT:
-                delete reinterpret_cast<safe_VkDrmFormatModifierPropertiesListEXT *>(header);
-                break;
-
-#ifdef VK_USE_PLATFORM_ANDROID_KHR 
-            case VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_USAGE_ANDROID:
-                delete reinterpret_cast<safe_VkAndroidHardwareBufferUsageANDROID *>(header);
-                break;
-#endif // VK_USE_PLATFORM_ANDROID_KHR 
-
-            case VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES:
-                delete reinterpret_cast<safe_VkExternalImageFormatProperties *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_FILTER_CUBIC_IMAGE_VIEW_IMAGE_FORMAT_PROPERTIES_EXT:
-                delete reinterpret_cast<safe_VkFilterCubicImageViewImageFormatPropertiesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_IMAGE_FORMAT_PROPERTIES:
-                delete reinterpret_cast<safe_VkSamplerYcbcrConversionImageFormatProperties *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_TEXTURE_LOD_GATHER_FORMAT_PROPERTIES_AMD:
-                delete reinterpret_cast<safe_VkTextureLODGatherFormatPropertiesAMD *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO:
-                delete reinterpret_cast<safe_VkPhysicalDeviceExternalImageFormatInfo *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_DRM_FORMAT_MODIFIER_INFO_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceImageDrmFormatModifierInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_VIEW_IMAGE_FORMAT_INFO_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceImageViewImageFormatInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_QUEUE_FAMILY_CHECKPOINT_PROPERTIES_NV:
-                delete reinterpret_cast<safe_VkQueueFamilyCheckpointPropertiesNV *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceMemoryBudgetPropertiesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXEL_BUFFER_ALIGNMENT_PROPERTIES_EXT:
-                delete reinterpret_cast<safe_VkPhysicalDeviceTexelBufferAlignmentPropertiesEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_LAYOUT_SUPPORT_EXT:
-                delete reinterpret_cast<safe_VkDescriptorSetVariableDescriptorCountLayoutSupportEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_DEVICE_GROUP_SWAPCHAIN_CREATE_INFO_KHR:
-                delete reinterpret_cast<safe_VkDeviceGroupSwapchainCreateInfoKHR *>(header);
-                break;
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR 
-            case VK_STRUCTURE_TYPE_SURFACE_FULL_SCREEN_EXCLUSIVE_INFO_EXT:
-                delete reinterpret_cast<safe_VkSurfaceFullScreenExclusiveInfoEXT *>(header);
-                break;
-#endif // VK_USE_PLATFORM_WIN32_KHR 
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR 
-            case VK_STRUCTURE_TYPE_SURFACE_FULL_SCREEN_EXCLUSIVE_WIN32_INFO_EXT:
-                delete reinterpret_cast<safe_VkSurfaceFullScreenExclusiveWin32InfoEXT *>(header);
-                break;
-#endif // VK_USE_PLATFORM_WIN32_KHR 
-
-            case VK_STRUCTURE_TYPE_SWAPCHAIN_COUNTER_CREATE_INFO_EXT:
-                delete reinterpret_cast<safe_VkSwapchainCounterCreateInfoEXT *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_SWAPCHAIN_DISPLAY_NATIVE_HDR_CREATE_INFO_AMD:
-                delete reinterpret_cast<safe_VkSwapchainDisplayNativeHdrCreateInfoAMD *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_DEVICE_GROUP_PRESENT_INFO_KHR:
-                delete reinterpret_cast<safe_VkDeviceGroupPresentInfoKHR *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_DISPLAY_PRESENT_INFO_KHR:
-                delete reinterpret_cast<safe_VkDisplayPresentInfoKHR *>(header);
-                break;
-
-#ifdef VK_USE_PLATFORM_GGP 
-            case VK_STRUCTURE_TYPE_PRESENT_FRAME_TOKEN_GGP:
-                delete reinterpret_cast<safe_VkPresentFrameTokenGGP *>(header);
-                break;
-#endif // VK_USE_PLATFORM_GGP 
-
-            case VK_STRUCTURE_TYPE_PRESENT_REGIONS_KHR:
-                delete reinterpret_cast<safe_VkPresentRegionsKHR *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE:
-                delete reinterpret_cast<safe_VkPresentTimesInfoGOOGLE *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE_KHR:
-                delete reinterpret_cast<safe_VkSubpassDescriptionDepthStencilResolveKHR *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_DISPLAY_NATIVE_HDR_SURFACE_CAPABILITIES_AMD:
-                delete reinterpret_cast<safe_VkDisplayNativeHdrSurfaceCapabilitiesAMD *>(header);
-                break;
-
-            case VK_STRUCTURE_TYPE_SHARED_PRESENT_SURFACE_CAPABILITIES_KHR:
-                delete reinterpret_cast<safe_VkSharedPresentSurfaceCapabilitiesKHR *>(header);
-                break;
-
-#ifdef VK_USE_PLATFORM_WIN32_KHR 
-            case VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES_FULL_SCREEN_EXCLUSIVE_EXT:
-                delete reinterpret_cast<safe_VkSurfaceCapabilitiesFullScreenExclusiveEXT *>(header);
-                break;
-#endif // VK_USE_PLATFORM_WIN32_KHR 
-
-            case VK_STRUCTURE_TYPE_SURFACE_PROTECTED_CAPABILITIES_KHR:
-                delete reinterpret_cast<safe_VkSurfaceProtectedCapabilitiesKHR *>(header);
-                break;
-
-#ifdef VK_USE_PLATFORM_ANDROID_KHR 
-            case VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID:
-                delete reinterpret_cast<safe_VkAndroidHardwareBufferFormatPropertiesANDROID *>(header);
-                break;
-#endif // VK_USE_PLATFORM_ANDROID_KHR 
-
-            default:
-                assert(0);
-        }
     }
 }
 
@@ -2089,7 +168,6 @@ VkResult DispatchCreateComputePipelines(VkDevice device, VkPipelineCache pipelin
                                                                                           pCreateInfos, pAllocator, pPipelines);
     safe_VkComputePipelineCreateInfo *local_pCreateInfos = NULL;
     if (pCreateInfos) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         local_pCreateInfos = new safe_VkComputePipelineCreateInfo[createInfoCount];
         for (uint32_t idx0 = 0; idx0 < createInfoCount; ++idx0) {
             local_pCreateInfos[idx0].initialize(&pCreateInfos[idx0]);
@@ -2105,7 +183,6 @@ VkResult DispatchCreateComputePipelines(VkDevice device, VkPipelineCache pipelin
         }
     }
     if (pipelineCache) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         pipelineCache = layer_data->Unwrap(pipelineCache);
     }
 
@@ -2113,7 +190,6 @@ VkResult DispatchCreateComputePipelines(VkDevice device, VkPipelineCache pipelin
                                                                                local_pCreateInfos->ptr(), pAllocator, pPipelines);
     delete[] local_pCreateInfos;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         for (uint32_t i = 0; i < createInfoCount; ++i) {
             if (pPipelines[i] != VK_NULL_HANDLE) {
                 pPipelines[i] = layer_data->WrapNew(pPipelines[i]);
@@ -2132,7 +208,7 @@ VkResult DispatchCreateGraphicsPipelines(VkDevice device, VkPipelineCache pipeli
     safe_VkGraphicsPipelineCreateInfo *local_pCreateInfos = nullptr;
     if (pCreateInfos) {
         local_pCreateInfos = new safe_VkGraphicsPipelineCreateInfo[createInfoCount];
-        std::lock_guard<std::mutex> lock(dispatch_lock);
+        read_dispatch_lock_guard_t lock(dispatch_lock);
         for (uint32_t idx0 = 0; idx0 < createInfoCount; ++idx0) {
             bool uses_color_attachment = false;
             bool uses_depthstencil_attachment = false;
@@ -2168,7 +244,6 @@ VkResult DispatchCreateGraphicsPipelines(VkDevice device, VkPipelineCache pipeli
         }
     }
     if (pipelineCache) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         pipelineCache = layer_data->Unwrap(pipelineCache);
     }
 
@@ -2176,7 +251,6 @@ VkResult DispatchCreateGraphicsPipelines(VkDevice device, VkPipelineCache pipeli
                                                                                 local_pCreateInfos->ptr(), pAllocator, pPipelines);
     delete[] local_pCreateInfos;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         for (uint32_t i = 0; i < createInfoCount; ++i) {
             if (pPipelines[i] != VK_NULL_HANDLE) {
                 pPipelines[i] = layer_data->WrapNew(pPipelines[i]);
@@ -2211,7 +285,7 @@ VkResult DispatchCreateRenderPass(VkDevice device, const VkRenderPassCreateInfo 
     VkResult result = layer_data->device_dispatch_table.CreateRenderPass(device, pCreateInfo, pAllocator, pRenderPass);
     if (!wrap_handles) return result;
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
+        write_dispatch_lock_guard_t lock(dispatch_lock);
         UpdateCreateRenderPassState(layer_data, pCreateInfo, *pRenderPass);
         *pRenderPass = layer_data->WrapNew(*pRenderPass);
     }
@@ -2224,7 +298,7 @@ VkResult DispatchCreateRenderPass2KHR(VkDevice device, const VkRenderPassCreateI
     VkResult result = layer_data->device_dispatch_table.CreateRenderPass2KHR(device, pCreateInfo, pAllocator, pRenderPass);
     if (!wrap_handles) return result;
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
+        write_dispatch_lock_guard_t lock(dispatch_lock);
         UpdateCreateRenderPassState(layer_data, pCreateInfo, *pRenderPass);
         *pRenderPass = layer_data->WrapNew(*pRenderPass);
     }
@@ -2234,14 +308,18 @@ VkResult DispatchCreateRenderPass2KHR(VkDevice device, const VkRenderPassCreateI
 void DispatchDestroyRenderPass(VkDevice device, VkRenderPass renderPass, const VkAllocationCallbacks *pAllocator) {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroyRenderPass(device, renderPass, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t renderPass_id = reinterpret_cast<uint64_t &>(renderPass);
-    renderPass = (VkRenderPass)unique_id_mapping[renderPass_id];
-    unique_id_mapping.erase(renderPass_id);
-    lock.unlock();
+
+    auto iter = unique_id_mapping.pop(renderPass_id);
+    if (iter != unique_id_mapping.end()) {
+        renderPass = (VkRenderPass)iter->second;
+    } else {
+        renderPass = (VkRenderPass)0;
+    }
+
     layer_data->device_dispatch_table.DestroyRenderPass(device, renderPass, pAllocator);
 
-    lock.lock();
+    write_dispatch_lock_guard_t lock(dispatch_lock);
     layer_data->renderpasses_states.erase(renderPass);
 }
 
@@ -2251,7 +329,6 @@ VkResult DispatchCreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfo
     if (!wrap_handles) return layer_data->device_dispatch_table.CreateSwapchainKHR(device, pCreateInfo, pAllocator, pSwapchain);
     safe_VkSwapchainCreateInfoKHR *local_pCreateInfo = NULL;
     if (pCreateInfo) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         local_pCreateInfo = new safe_VkSwapchainCreateInfoKHR(pCreateInfo);
         local_pCreateInfo->oldSwapchain = layer_data->Unwrap(pCreateInfo->oldSwapchain);
         // Surface is instance-level object
@@ -2262,7 +339,6 @@ VkResult DispatchCreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfo
     delete local_pCreateInfo;
 
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pSwapchain = layer_data->WrapNew(*pSwapchain);
     }
     return result;
@@ -2276,7 +352,6 @@ VkResult DispatchCreateSharedSwapchainsKHR(VkDevice device, uint32_t swapchainCo
                                                                            pSwapchains);
     safe_VkSwapchainCreateInfoKHR *local_pCreateInfos = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pCreateInfos) {
             local_pCreateInfos = new safe_VkSwapchainCreateInfoKHR[swapchainCount];
             for (uint32_t i = 0; i < swapchainCount; ++i) {
@@ -2295,7 +370,6 @@ VkResult DispatchCreateSharedSwapchainsKHR(VkDevice device, uint32_t swapchainCo
                                                                                   pAllocator, pSwapchains);
     delete[] local_pCreateInfos;
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         for (uint32_t i = 0; i < swapchainCount; i++) {
             pSwapchains[i] = layer_data->WrapNew(pSwapchains[i]);
         }
@@ -2310,14 +384,13 @@ VkResult DispatchGetSwapchainImagesKHR(VkDevice device, VkSwapchainKHR swapchain
         return layer_data->device_dispatch_table.GetSwapchainImagesKHR(device, swapchain, pSwapchainImageCount, pSwapchainImages);
     VkSwapchainKHR wrapped_swapchain_handle = swapchain;
     if (VK_NULL_HANDLE != swapchain) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         swapchain = layer_data->Unwrap(swapchain);
     }
     VkResult result =
         layer_data->device_dispatch_table.GetSwapchainImagesKHR(device, swapchain, pSwapchainImageCount, pSwapchainImages);
     if ((VK_SUCCESS == result) || (VK_INCOMPLETE == result)) {
         if ((*pSwapchainImageCount > 0) && pSwapchainImages) {
-            std::lock_guard<std::mutex> lock(dispatch_lock);
+            write_dispatch_lock_guard_t lock(dispatch_lock);
             auto &wrapped_swapchain_image_handles = layer_data->swapchain_wrapped_image_handle_map[wrapped_swapchain_handle];
             for (uint32_t i = static_cast<uint32_t>(wrapped_swapchain_image_handles.size()); i < *pSwapchainImageCount; i++) {
                 wrapped_swapchain_image_handles.emplace_back(layer_data->WrapNew(pSwapchainImages[i]));
@@ -2333,18 +406,24 @@ VkResult DispatchGetSwapchainImagesKHR(VkDevice device, VkSwapchainKHR swapchain
 void DispatchDestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain, const VkAllocationCallbacks *pAllocator) {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroySwapchainKHR(device, swapchain, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
+    write_dispatch_lock_guard_t lock(dispatch_lock);
 
     auto &image_array = layer_data->swapchain_wrapped_image_handle_map[swapchain];
     for (auto &image_handle : image_array) {
         unique_id_mapping.erase(HandleToUint64(image_handle));
     }
     layer_data->swapchain_wrapped_image_handle_map.erase(swapchain);
+    lock.unlock();
 
     uint64_t swapchain_id = HandleToUint64(swapchain);
-    swapchain = (VkSwapchainKHR)unique_id_mapping[swapchain_id];
-    unique_id_mapping.erase(swapchain_id);
-    lock.unlock();
+
+    auto iter = unique_id_mapping.pop(swapchain_id);
+    if (iter != unique_id_mapping.end()) {
+        swapchain = (VkSwapchainKHR)iter->second;
+    } else {
+        swapchain = (VkSwapchainKHR)0;
+    }
+
     layer_data->device_dispatch_table.DestroySwapchainKHR(device, swapchain, pAllocator);
 }
 
@@ -2353,7 +432,6 @@ VkResult DispatchQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *pPresent
     if (!wrap_handles) return layer_data->device_dispatch_table.QueuePresentKHR(queue, pPresentInfo);
     safe_VkPresentInfoKHR *local_pPresentInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pPresentInfo) {
             local_pPresentInfo = new safe_VkPresentInfoKHR(pPresentInfo);
             if (local_pPresentInfo->pWaitSemaphores) {
@@ -2384,18 +462,24 @@ VkResult DispatchQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *pPresent
 void DispatchDestroyDescriptorPool(VkDevice device, VkDescriptorPool descriptorPool, const VkAllocationCallbacks *pAllocator) {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroyDescriptorPool(device, descriptorPool, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
+    write_dispatch_lock_guard_t lock(dispatch_lock);
 
     // remove references to implicitly freed descriptor sets
     for(auto descriptor_set : layer_data->pool_descriptor_sets_map[descriptorPool]) {
         unique_id_mapping.erase(reinterpret_cast<uint64_t &>(descriptor_set));
     }
     layer_data->pool_descriptor_sets_map.erase(descriptorPool);
+    lock.unlock();
 
     uint64_t descriptorPool_id = reinterpret_cast<uint64_t &>(descriptorPool);
-    descriptorPool = (VkDescriptorPool)unique_id_mapping[descriptorPool_id];
-    unique_id_mapping.erase(descriptorPool_id);
-    lock.unlock();
+
+    auto iter = unique_id_mapping.pop(descriptorPool_id);
+    if (iter != unique_id_mapping.end()) {
+        descriptorPool = (VkDescriptorPool)iter->second;
+    } else {
+        descriptorPool = (VkDescriptorPool)0;
+    }
+
     layer_data->device_dispatch_table.DestroyDescriptorPool(device, descriptorPool, pAllocator);
 }
 
@@ -2404,12 +488,11 @@ VkResult DispatchResetDescriptorPool(VkDevice device, VkDescriptorPool descripto
     if (!wrap_handles) return layer_data->device_dispatch_table.ResetDescriptorPool(device, descriptorPool, flags);
     VkDescriptorPool local_descriptor_pool = VK_NULL_HANDLE;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         local_descriptor_pool = layer_data->Unwrap(descriptorPool);
     }
     VkResult result = layer_data->device_dispatch_table.ResetDescriptorPool(device, local_descriptor_pool, flags);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
+        write_dispatch_lock_guard_t lock(dispatch_lock);
         // remove references to implicitly freed descriptor sets
         for(auto descriptor_set : layer_data->pool_descriptor_sets_map[descriptorPool]) {
             unique_id_mapping.erase(reinterpret_cast<uint64_t &>(descriptor_set));
@@ -2426,7 +509,6 @@ VkResult DispatchAllocateDescriptorSets(VkDevice device, const VkDescriptorSetAl
     if (!wrap_handles) return layer_data->device_dispatch_table.AllocateDescriptorSets(device, pAllocateInfo, pDescriptorSets);
     safe_VkDescriptorSetAllocateInfo *local_pAllocateInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pAllocateInfo) {
             local_pAllocateInfo = new safe_VkDescriptorSetAllocateInfo(pAllocateInfo);
             if (pAllocateInfo->descriptorPool) {
@@ -2445,7 +527,7 @@ VkResult DispatchAllocateDescriptorSets(VkDevice device, const VkDescriptorSetAl
         delete local_pAllocateInfo;
     }
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
+        write_dispatch_lock_guard_t lock(dispatch_lock);
         auto &pool_descriptor_sets = layer_data->pool_descriptor_sets_map[pAllocateInfo->descriptorPool];
         for (uint32_t index0 = 0; index0 < pAllocateInfo->descriptorSetCount; index0++) {
             pDescriptorSets[index0] = layer_data->WrapNew(pDescriptorSets[index0]);
@@ -2463,7 +545,6 @@ VkResult DispatchFreeDescriptorSets(VkDevice device, VkDescriptorPool descriptor
     VkDescriptorSet *local_pDescriptorSets = NULL;
     VkDescriptorPool local_descriptor_pool = VK_NULL_HANDLE;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         local_descriptor_pool = layer_data->Unwrap(descriptorPool);
         if (pDescriptorSets) {
             local_pDescriptorSets = new VkDescriptorSet[descriptorSetCount];
@@ -2476,7 +557,7 @@ VkResult DispatchFreeDescriptorSets(VkDevice device, VkDescriptorPool descriptor
                                                                            (const VkDescriptorSet *)local_pDescriptorSets);
     if (local_pDescriptorSets) delete[] local_pDescriptorSets;
     if ((VK_SUCCESS == result) && (pDescriptorSets)) {
-        std::unique_lock<std::mutex> lock(dispatch_lock);
+        write_dispatch_lock_guard_t lock(dispatch_lock);
         auto &pool_descriptor_sets = layer_data->pool_descriptor_sets_map[descriptorPool];
         for (uint32_t index0 = 0; index0 < descriptorSetCount; index0++) {
             VkDescriptorSet handle = pDescriptorSets[index0];
@@ -2498,7 +579,6 @@ VkResult DispatchCreateDescriptorUpdateTemplate(VkDevice device, const VkDescrip
                                                                                 pDescriptorUpdateTemplate);
     safe_VkDescriptorUpdateTemplateCreateInfo *local_create_info = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pCreateInfo) {
             local_create_info = new safe_VkDescriptorUpdateTemplateCreateInfo(pCreateInfo);
             if (pCreateInfo->descriptorSetLayout) {
@@ -2512,7 +592,7 @@ VkResult DispatchCreateDescriptorUpdateTemplate(VkDevice device, const VkDescrip
     VkResult result = layer_data->device_dispatch_table.CreateDescriptorUpdateTemplate(device, local_create_info->ptr(), pAllocator,
                                                                                        pDescriptorUpdateTemplate);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
+        write_dispatch_lock_guard_t lock(dispatch_lock);
         *pDescriptorUpdateTemplate = layer_data->WrapNew(*pDescriptorUpdateTemplate);
 
         // Shadow template createInfo for later updates
@@ -2532,7 +612,6 @@ VkResult DispatchCreateDescriptorUpdateTemplateKHR(VkDevice device, const VkDesc
                                                                                    pDescriptorUpdateTemplate);
     safe_VkDescriptorUpdateTemplateCreateInfo *local_create_info = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pCreateInfo) {
             local_create_info = new safe_VkDescriptorUpdateTemplateCreateInfo(pCreateInfo);
             if (pCreateInfo->descriptorSetLayout) {
@@ -2546,7 +625,7 @@ VkResult DispatchCreateDescriptorUpdateTemplateKHR(VkDevice device, const VkDesc
     VkResult result = layer_data->device_dispatch_table.CreateDescriptorUpdateTemplateKHR(device, local_create_info->ptr(), pAllocator,
                                                                                           pDescriptorUpdateTemplate);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
+        write_dispatch_lock_guard_t lock(dispatch_lock);
         *pDescriptorUpdateTemplate = layer_data->WrapNew(*pDescriptorUpdateTemplate);
 
         // Shadow template createInfo for later updates
@@ -2562,12 +641,18 @@ void DispatchDestroyDescriptorUpdateTemplate(VkDevice device, VkDescriptorUpdate
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles)
         return layer_data->device_dispatch_table.DestroyDescriptorUpdateTemplate(device, descriptorUpdateTemplate, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
+    write_dispatch_lock_guard_t lock(dispatch_lock);
     uint64_t descriptor_update_template_id = reinterpret_cast<uint64_t &>(descriptorUpdateTemplate);
     layer_data->desc_template_createinfo_map.erase(descriptor_update_template_id);
-    descriptorUpdateTemplate = (VkDescriptorUpdateTemplate)unique_id_mapping[descriptor_update_template_id];
-    unique_id_mapping.erase(descriptor_update_template_id);
     lock.unlock();
+
+    auto iter = unique_id_mapping.pop(descriptor_update_template_id);
+    if (iter != unique_id_mapping.end()) {
+        descriptorUpdateTemplate = (VkDescriptorUpdateTemplate)iter->second;
+    } else {
+        descriptorUpdateTemplate = (VkDescriptorUpdateTemplate)0;
+    }
+
     layer_data->device_dispatch_table.DestroyDescriptorUpdateTemplate(device, descriptorUpdateTemplate, pAllocator);
 }
 
@@ -2577,12 +662,18 @@ void DispatchDestroyDescriptorUpdateTemplateKHR(VkDevice device, VkDescriptorUpd
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles)
         return layer_data->device_dispatch_table.DestroyDescriptorUpdateTemplateKHR(device, descriptorUpdateTemplate, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
+    write_dispatch_lock_guard_t lock(dispatch_lock);
     uint64_t descriptor_update_template_id = reinterpret_cast<uint64_t &>(descriptorUpdateTemplate);
     layer_data->desc_template_createinfo_map.erase(descriptor_update_template_id);
-    descriptorUpdateTemplate = (VkDescriptorUpdateTemplate)unique_id_mapping[descriptor_update_template_id];
-    unique_id_mapping.erase(descriptor_update_template_id);
     lock.unlock();
+
+    auto iter = unique_id_mapping.pop(descriptor_update_template_id);
+    if (iter != unique_id_mapping.end()) {
+        descriptorUpdateTemplate = (VkDescriptorUpdateTemplate)iter->second;
+    } else {
+        descriptorUpdateTemplate = (VkDescriptorUpdateTemplate)0;
+    }
+
     layer_data->device_dispatch_table.DestroyDescriptorUpdateTemplateKHR(device, descriptorUpdateTemplate, pAllocator);
 }
 
@@ -2692,12 +783,13 @@ void DispatchUpdateDescriptorSetWithTemplate(VkDevice device, VkDescriptorSet de
         return layer_data->device_dispatch_table.UpdateDescriptorSetWithTemplate(device, descriptorSet, descriptorUpdateTemplate,
                                                                                  pData);
     uint64_t template_handle = reinterpret_cast<uint64_t &>(descriptorUpdateTemplate);
+    void *unwrapped_buffer = nullptr;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
+        read_dispatch_lock_guard_t lock(dispatch_lock);
         descriptorSet = layer_data->Unwrap(descriptorSet);
-        descriptorUpdateTemplate = (VkDescriptorUpdateTemplate)unique_id_mapping[template_handle];
+        descriptorUpdateTemplate = (VkDescriptorUpdateTemplate)layer_data->Unwrap(descriptorUpdateTemplate);
+        unwrapped_buffer = BuildUnwrappedUpdateTemplateBuffer(layer_data, template_handle, pData);
     }
-    void *unwrapped_buffer = BuildUnwrappedUpdateTemplateBuffer(layer_data, template_handle, pData);
     layer_data->device_dispatch_table.UpdateDescriptorSetWithTemplate(device, descriptorSet, descriptorUpdateTemplate, unwrapped_buffer);
     free(unwrapped_buffer);
 }
@@ -2711,9 +803,9 @@ void DispatchUpdateDescriptorSetWithTemplateKHR(VkDevice device, VkDescriptorSet
     uint64_t template_handle = reinterpret_cast<uint64_t &>(descriptorUpdateTemplate);
     void *unwrapped_buffer = nullptr;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
+        read_dispatch_lock_guard_t lock(dispatch_lock);
         descriptorSet = layer_data->Unwrap(descriptorSet);
-        descriptorUpdateTemplate = (VkDescriptorUpdateTemplate)unique_id_mapping[template_handle];
+        descriptorUpdateTemplate = layer_data->Unwrap(descriptorUpdateTemplate);
         unwrapped_buffer = BuildUnwrappedUpdateTemplateBuffer(layer_data, template_handle, pData);
     }
     layer_data->device_dispatch_table.UpdateDescriptorSetWithTemplateKHR(device, descriptorSet, descriptorUpdateTemplate, unwrapped_buffer);
@@ -2730,7 +822,7 @@ void DispatchCmdPushDescriptorSetWithTemplateKHR(VkCommandBuffer commandBuffer,
     uint64_t template_handle = reinterpret_cast<uint64_t &>(descriptorUpdateTemplate);
     void *unwrapped_buffer = nullptr;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
+        read_dispatch_lock_guard_t lock(dispatch_lock);
         descriptorUpdateTemplate = layer_data->Unwrap(descriptorUpdateTemplate);
         layout = layer_data->Unwrap(layout);
         unwrapped_buffer = BuildUnwrappedUpdateTemplateBuffer(layer_data, template_handle, pData);
@@ -2747,7 +839,6 @@ VkResult DispatchGetPhysicalDeviceDisplayPropertiesKHR(VkPhysicalDevice physical
         layer_data->instance_dispatch_table.GetPhysicalDeviceDisplayPropertiesKHR(physicalDevice, pPropertyCount, pProperties);
     if (!wrap_handles) return result;
     if ((result == VK_SUCCESS || result == VK_INCOMPLETE) && pProperties) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         for (uint32_t idx0 = 0; idx0 < *pPropertyCount; ++idx0) {
             pProperties[idx0].display = layer_data->MaybeWrapDisplay(pProperties[idx0].display, layer_data);
         }
@@ -2762,7 +853,6 @@ VkResult DispatchGetPhysicalDeviceDisplayProperties2KHR(VkPhysicalDevice physica
         layer_data->instance_dispatch_table.GetPhysicalDeviceDisplayProperties2KHR(physicalDevice, pPropertyCount, pProperties);
     if (!wrap_handles) return result;
     if ((result == VK_SUCCESS || result == VK_INCOMPLETE) && pProperties) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         for (uint32_t idx0 = 0; idx0 < *pPropertyCount; ++idx0) {
             pProperties[idx0].displayProperties.display =
                 layer_data->MaybeWrapDisplay(pProperties[idx0].displayProperties.display, layer_data);
@@ -2778,7 +868,6 @@ VkResult DispatchGetPhysicalDeviceDisplayPlanePropertiesKHR(VkPhysicalDevice phy
         layer_data->instance_dispatch_table.GetPhysicalDeviceDisplayPlanePropertiesKHR(physicalDevice, pPropertyCount, pProperties);
     if (!wrap_handles) return result;
     if ((result == VK_SUCCESS || result == VK_INCOMPLETE) && pProperties) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         for (uint32_t idx0 = 0; idx0 < *pPropertyCount; ++idx0) {
             VkDisplayKHR &opt_display = pProperties[idx0].currentDisplay;
             if (opt_display) opt_display = layer_data->MaybeWrapDisplay(opt_display, layer_data);
@@ -2794,7 +883,6 @@ VkResult DispatchGetPhysicalDeviceDisplayPlaneProperties2KHR(VkPhysicalDevice ph
                                                                                                       pPropertyCount, pProperties);
     if (!wrap_handles) return result;
     if ((result == VK_SUCCESS || result == VK_INCOMPLETE) && pProperties) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         for (uint32_t idx0 = 0; idx0 < *pPropertyCount; ++idx0) {
             VkDisplayKHR &opt_display = pProperties[idx0].displayPlaneProperties.currentDisplay;
             if (opt_display) opt_display = layer_data->MaybeWrapDisplay(opt_display, layer_data);
@@ -2810,7 +898,6 @@ VkResult DispatchGetDisplayPlaneSupportedDisplaysKHR(VkPhysicalDevice physicalDe
                                                                                               pDisplayCount, pDisplays);
     if ((result == VK_SUCCESS || result == VK_INCOMPLETE) && pDisplays) {
     if (!wrap_handles) return result;
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         for (uint32_t i = 0; i < *pDisplayCount; ++i) {
             if (pDisplays[i]) pDisplays[i] = layer_data->MaybeWrapDisplay(pDisplays[i], layer_data);
         }
@@ -2825,13 +912,11 @@ VkResult DispatchGetDisplayModePropertiesKHR(VkPhysicalDevice physicalDevice, Vk
         return layer_data->instance_dispatch_table.GetDisplayModePropertiesKHR(physicalDevice, display, pPropertyCount,
                                                                                pProperties);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         display = layer_data->Unwrap(display);
     }
 
     VkResult result = layer_data->instance_dispatch_table.GetDisplayModePropertiesKHR(physicalDevice, display, pPropertyCount, pProperties);
     if ((result == VK_SUCCESS || result == VK_INCOMPLETE) && pProperties) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         for (uint32_t idx0 = 0; idx0 < *pPropertyCount; ++idx0) {
             pProperties[idx0].displayMode = layer_data->WrapNew(pProperties[idx0].displayMode);
         }
@@ -2846,14 +931,12 @@ VkResult DispatchGetDisplayModeProperties2KHR(VkPhysicalDevice physicalDevice, V
         return layer_data->instance_dispatch_table.GetDisplayModeProperties2KHR(physicalDevice, display, pPropertyCount,
                                                                                 pProperties);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         display = layer_data->Unwrap(display);
     }
 
     VkResult result =
         layer_data->instance_dispatch_table.GetDisplayModeProperties2KHR(physicalDevice, display, pPropertyCount, pProperties);
     if ((result == VK_SUCCESS || result == VK_INCOMPLETE) && pProperties) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         for (uint32_t idx0 = 0; idx0 < *pPropertyCount; ++idx0) {
             pProperties[idx0].displayModeProperties.displayMode = layer_data->WrapNew(pProperties[idx0].displayModeProperties.displayMode);
         }
@@ -2866,7 +949,6 @@ VkResult DispatchDebugMarkerSetObjectTagEXT(VkDevice device, const VkDebugMarker
     if (!wrap_handles) return layer_data->device_dispatch_table.DebugMarkerSetObjectTagEXT(device, pTagInfo);
     safe_VkDebugMarkerObjectTagInfoEXT local_tag_info(pTagInfo);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         auto it = unique_id_mapping.find(reinterpret_cast<uint64_t &>(local_tag_info.object));
         if (it != unique_id_mapping.end()) {
             local_tag_info.object = it->second;
@@ -2882,7 +964,6 @@ VkResult DispatchDebugMarkerSetObjectNameEXT(VkDevice device, const VkDebugMarke
     if (!wrap_handles) return layer_data->device_dispatch_table.DebugMarkerSetObjectNameEXT(device, pNameInfo);
     safe_VkDebugMarkerObjectNameInfoEXT local_name_info(pNameInfo);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         auto it = unique_id_mapping.find(reinterpret_cast<uint64_t &>(local_name_info.object));
         if (it != unique_id_mapping.end()) {
             local_name_info.object = it->second;
@@ -2899,7 +980,6 @@ VkResult DispatchSetDebugUtilsObjectTagEXT(VkDevice device, const VkDebugUtilsOb
     if (!wrap_handles) return layer_data->device_dispatch_table.SetDebugUtilsObjectTagEXT(device, pTagInfo);
     safe_VkDebugUtilsObjectTagInfoEXT local_tag_info(pTagInfo);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         auto it = unique_id_mapping.find(reinterpret_cast<uint64_t &>(local_tag_info.objectHandle));
         if (it != unique_id_mapping.end()) {
             local_tag_info.objectHandle = it->second;
@@ -2915,7 +995,6 @@ VkResult DispatchSetDebugUtilsObjectNameEXT(VkDevice device, const VkDebugUtilsO
     if (!wrap_handles) return layer_data->device_dispatch_table.SetDebugUtilsObjectNameEXT(device, pNameInfo);
     safe_VkDebugUtilsObjectNameInfoEXT local_name_info(pNameInfo);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         auto it = unique_id_mapping.find(reinterpret_cast<uint64_t &>(local_name_info.objectHandle));
         if (it != unique_id_mapping.end()) {
             local_name_info.objectHandle = it->second;
@@ -3059,12 +1138,11 @@ VkResult DispatchQueueSubmit(
     if (!wrap_handles) return layer_data->device_dispatch_table.QueueSubmit(queue, submitCount, pSubmits, fence);
     safe_VkSubmitInfo *local_pSubmits = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pSubmits) {
             local_pSubmits = new safe_VkSubmitInfo[submitCount];
             for (uint32_t index0 = 0; index0 < submitCount; ++index0) {
                 local_pSubmits[index0].initialize(&pSubmits[index0]);
-                local_pSubmits[index0].pNext = CreateUnwrappedExtensionStructs(layer_data, local_pSubmits[index0].pNext);
+                WrapPnextChainHandles(layer_data, local_pSubmits[index0].pNext);
                 if (local_pSubmits[index0].pWaitSemaphores) {
                     for (uint32_t index1 = 0; index1 < local_pSubmits[index0].waitSemaphoreCount; ++index1) {
                         local_pSubmits[index0].pWaitSemaphores[index1] = layer_data->Unwrap(local_pSubmits[index0].pWaitSemaphores[index1]);
@@ -3081,9 +1159,6 @@ VkResult DispatchQueueSubmit(
     }
     VkResult result = layer_data->device_dispatch_table.QueueSubmit(queue, submitCount, (const VkSubmitInfo*)local_pSubmits, fence);
     if (local_pSubmits) {
-        for (uint32_t index0 = 0; index0 < submitCount; ++index0) {
-            FreeUnwrappedExtensionStructs(const_cast<void *>(local_pSubmits[index0].pNext));
-        }
         delete[] local_pSubmits;
     }
     return result;
@@ -3117,19 +1192,16 @@ VkResult DispatchAllocateMemory(
     if (!wrap_handles) return layer_data->device_dispatch_table.AllocateMemory(device, pAllocateInfo, pAllocator, pMemory);
     safe_VkMemoryAllocateInfo *local_pAllocateInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pAllocateInfo) {
             local_pAllocateInfo = new safe_VkMemoryAllocateInfo(pAllocateInfo);
-            local_pAllocateInfo->pNext = CreateUnwrappedExtensionStructs(layer_data, local_pAllocateInfo->pNext);
+            WrapPnextChainHandles(layer_data, local_pAllocateInfo->pNext);
         }
     }
     VkResult result = layer_data->device_dispatch_table.AllocateMemory(device, (const VkMemoryAllocateInfo*)local_pAllocateInfo, pAllocator, pMemory);
     if (local_pAllocateInfo) {
-        FreeUnwrappedExtensionStructs(const_cast<void *>(local_pAllocateInfo->pNext));
         delete local_pAllocateInfo;
     }
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pMemory = layer_data->WrapNew(*pMemory);
     }
     return result;
@@ -3142,11 +1214,13 @@ void DispatchFreeMemory(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.FreeMemory(device, memory, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t memory_id = reinterpret_cast<uint64_t &>(memory);
-    memory = (VkDeviceMemory)unique_id_mapping[memory_id];
-    unique_id_mapping.erase(memory_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(memory_id);
+    if (iter != unique_id_mapping.end()) {
+        memory = (VkDeviceMemory)iter->second;
+    } else {
+        memory = (VkDeviceMemory)0;
+    }
     layer_data->device_dispatch_table.FreeMemory(device, memory, pAllocator);
 
 }
@@ -3162,7 +1236,6 @@ VkResult DispatchMapMemory(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.MapMemory(device, memory, offset, size, flags, ppData);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         memory = layer_data->Unwrap(memory);
     }
     VkResult result = layer_data->device_dispatch_table.MapMemory(device, memory, offset, size, flags, ppData);
@@ -3177,7 +1250,6 @@ void DispatchUnmapMemory(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.UnmapMemory(device, memory);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         memory = layer_data->Unwrap(memory);
     }
     layer_data->device_dispatch_table.UnmapMemory(device, memory);
@@ -3193,7 +1265,6 @@ VkResult DispatchFlushMappedMemoryRanges(
     if (!wrap_handles) return layer_data->device_dispatch_table.FlushMappedMemoryRanges(device, memoryRangeCount, pMemoryRanges);
     safe_VkMappedMemoryRange *local_pMemoryRanges = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pMemoryRanges) {
             local_pMemoryRanges = new safe_VkMappedMemoryRange[memoryRangeCount];
             for (uint32_t index0 = 0; index0 < memoryRangeCount; ++index0) {
@@ -3220,7 +1291,6 @@ VkResult DispatchInvalidateMappedMemoryRanges(
     if (!wrap_handles) return layer_data->device_dispatch_table.InvalidateMappedMemoryRanges(device, memoryRangeCount, pMemoryRanges);
     safe_VkMappedMemoryRange *local_pMemoryRanges = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pMemoryRanges) {
             local_pMemoryRanges = new safe_VkMappedMemoryRange[memoryRangeCount];
             for (uint32_t index0 = 0; index0 < memoryRangeCount; ++index0) {
@@ -3246,7 +1316,6 @@ void DispatchGetDeviceMemoryCommitment(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.GetDeviceMemoryCommitment(device, memory, pCommittedMemoryInBytes);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         memory = layer_data->Unwrap(memory);
     }
     layer_data->device_dispatch_table.GetDeviceMemoryCommitment(device, memory, pCommittedMemoryInBytes);
@@ -3262,7 +1331,6 @@ VkResult DispatchBindBufferMemory(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.BindBufferMemory(device, buffer, memory, memoryOffset);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         buffer = layer_data->Unwrap(buffer);
         memory = layer_data->Unwrap(memory);
     }
@@ -3280,7 +1348,6 @@ VkResult DispatchBindImageMemory(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.BindImageMemory(device, image, memory, memoryOffset);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         image = layer_data->Unwrap(image);
         memory = layer_data->Unwrap(memory);
     }
@@ -3297,7 +1364,6 @@ void DispatchGetBufferMemoryRequirements(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.GetBufferMemoryRequirements(device, buffer, pMemoryRequirements);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         buffer = layer_data->Unwrap(buffer);
     }
     layer_data->device_dispatch_table.GetBufferMemoryRequirements(device, buffer, pMemoryRequirements);
@@ -3312,7 +1378,6 @@ void DispatchGetImageMemoryRequirements(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.GetImageMemoryRequirements(device, image, pMemoryRequirements);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         image = layer_data->Unwrap(image);
     }
     layer_data->device_dispatch_table.GetImageMemoryRequirements(device, image, pMemoryRequirements);
@@ -3328,7 +1393,6 @@ void DispatchGetImageSparseMemoryRequirements(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.GetImageSparseMemoryRequirements(device, image, pSparseMemoryRequirementCount, pSparseMemoryRequirements);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         image = layer_data->Unwrap(image);
     }
     layer_data->device_dispatch_table.GetImageSparseMemoryRequirements(device, image, pSparseMemoryRequirementCount, pSparseMemoryRequirements);
@@ -3360,7 +1424,6 @@ VkResult DispatchQueueBindSparse(
     if (!wrap_handles) return layer_data->device_dispatch_table.QueueBindSparse(queue, bindInfoCount, pBindInfo, fence);
     safe_VkBindSparseInfo *local_pBindInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pBindInfo) {
             local_pBindInfo = new safe_VkBindSparseInfo[bindInfoCount];
             for (uint32_t index0 = 0; index0 < bindInfoCount; ++index0) {
@@ -3438,7 +1501,6 @@ VkResult DispatchCreateFence(
     if (!wrap_handles) return layer_data->device_dispatch_table.CreateFence(device, pCreateInfo, pAllocator, pFence);
     VkResult result = layer_data->device_dispatch_table.CreateFence(device, pCreateInfo, pAllocator, pFence);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pFence = layer_data->WrapNew(*pFence);
     }
     return result;
@@ -3451,11 +1513,13 @@ void DispatchDestroyFence(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroyFence(device, fence, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t fence_id = reinterpret_cast<uint64_t &>(fence);
-    fence = (VkFence)unique_id_mapping[fence_id];
-    unique_id_mapping.erase(fence_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(fence_id);
+    if (iter != unique_id_mapping.end()) {
+        fence = (VkFence)iter->second;
+    } else {
+        fence = (VkFence)0;
+    }
     layer_data->device_dispatch_table.DestroyFence(device, fence, pAllocator);
 
 }
@@ -3469,7 +1533,6 @@ VkResult DispatchResetFences(
     if (!wrap_handles) return layer_data->device_dispatch_table.ResetFences(device, fenceCount, pFences);
     VkFence *local_pFences = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pFences) {
             local_pFences = new VkFence[fenceCount];
             for (uint32_t index0 = 0; index0 < fenceCount; ++index0) {
@@ -3490,7 +1553,6 @@ VkResult DispatchGetFenceStatus(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.GetFenceStatus(device, fence);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         fence = layer_data->Unwrap(fence);
     }
     VkResult result = layer_data->device_dispatch_table.GetFenceStatus(device, fence);
@@ -3509,7 +1571,6 @@ VkResult DispatchWaitForFences(
     if (!wrap_handles) return layer_data->device_dispatch_table.WaitForFences(device, fenceCount, pFences, waitAll, timeout);
     VkFence *local_pFences = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pFences) {
             local_pFences = new VkFence[fenceCount];
             for (uint32_t index0 = 0; index0 < fenceCount; ++index0) {
@@ -3533,7 +1594,6 @@ VkResult DispatchCreateSemaphore(
     if (!wrap_handles) return layer_data->device_dispatch_table.CreateSemaphore(device, pCreateInfo, pAllocator, pSemaphore);
     VkResult result = layer_data->device_dispatch_table.CreateSemaphore(device, pCreateInfo, pAllocator, pSemaphore);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pSemaphore = layer_data->WrapNew(*pSemaphore);
     }
     return result;
@@ -3546,11 +1606,13 @@ void DispatchDestroySemaphore(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroySemaphore(device, semaphore, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t semaphore_id = reinterpret_cast<uint64_t &>(semaphore);
-    semaphore = (VkSemaphore)unique_id_mapping[semaphore_id];
-    unique_id_mapping.erase(semaphore_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(semaphore_id);
+    if (iter != unique_id_mapping.end()) {
+        semaphore = (VkSemaphore)iter->second;
+    } else {
+        semaphore = (VkSemaphore)0;
+    }
     layer_data->device_dispatch_table.DestroySemaphore(device, semaphore, pAllocator);
 
 }
@@ -3565,7 +1627,6 @@ VkResult DispatchCreateEvent(
     if (!wrap_handles) return layer_data->device_dispatch_table.CreateEvent(device, pCreateInfo, pAllocator, pEvent);
     VkResult result = layer_data->device_dispatch_table.CreateEvent(device, pCreateInfo, pAllocator, pEvent);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pEvent = layer_data->WrapNew(*pEvent);
     }
     return result;
@@ -3578,11 +1639,13 @@ void DispatchDestroyEvent(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroyEvent(device, event, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t event_id = reinterpret_cast<uint64_t &>(event);
-    event = (VkEvent)unique_id_mapping[event_id];
-    unique_id_mapping.erase(event_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(event_id);
+    if (iter != unique_id_mapping.end()) {
+        event = (VkEvent)iter->second;
+    } else {
+        event = (VkEvent)0;
+    }
     layer_data->device_dispatch_table.DestroyEvent(device, event, pAllocator);
 
 }
@@ -3594,7 +1657,6 @@ VkResult DispatchGetEventStatus(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.GetEventStatus(device, event);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         event = layer_data->Unwrap(event);
     }
     VkResult result = layer_data->device_dispatch_table.GetEventStatus(device, event);
@@ -3609,7 +1671,6 @@ VkResult DispatchSetEvent(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.SetEvent(device, event);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         event = layer_data->Unwrap(event);
     }
     VkResult result = layer_data->device_dispatch_table.SetEvent(device, event);
@@ -3624,7 +1685,6 @@ VkResult DispatchResetEvent(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.ResetEvent(device, event);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         event = layer_data->Unwrap(event);
     }
     VkResult result = layer_data->device_dispatch_table.ResetEvent(device, event);
@@ -3642,7 +1702,6 @@ VkResult DispatchCreateQueryPool(
     if (!wrap_handles) return layer_data->device_dispatch_table.CreateQueryPool(device, pCreateInfo, pAllocator, pQueryPool);
     VkResult result = layer_data->device_dispatch_table.CreateQueryPool(device, pCreateInfo, pAllocator, pQueryPool);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pQueryPool = layer_data->WrapNew(*pQueryPool);
     }
     return result;
@@ -3655,11 +1714,13 @@ void DispatchDestroyQueryPool(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroyQueryPool(device, queryPool, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t queryPool_id = reinterpret_cast<uint64_t &>(queryPool);
-    queryPool = (VkQueryPool)unique_id_mapping[queryPool_id];
-    unique_id_mapping.erase(queryPool_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(queryPool_id);
+    if (iter != unique_id_mapping.end()) {
+        queryPool = (VkQueryPool)iter->second;
+    } else {
+        queryPool = (VkQueryPool)0;
+    }
     layer_data->device_dispatch_table.DestroyQueryPool(device, queryPool, pAllocator);
 
 }
@@ -3677,7 +1738,6 @@ VkResult DispatchGetQueryPoolResults(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.GetQueryPoolResults(device, queryPool, firstQuery, queryCount, dataSize, pData, stride, flags);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         queryPool = layer_data->Unwrap(queryPool);
     }
     VkResult result = layer_data->device_dispatch_table.GetQueryPoolResults(device, queryPool, firstQuery, queryCount, dataSize, pData, stride, flags);
@@ -3695,7 +1755,6 @@ VkResult DispatchCreateBuffer(
     if (!wrap_handles) return layer_data->device_dispatch_table.CreateBuffer(device, pCreateInfo, pAllocator, pBuffer);
     VkResult result = layer_data->device_dispatch_table.CreateBuffer(device, pCreateInfo, pAllocator, pBuffer);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pBuffer = layer_data->WrapNew(*pBuffer);
     }
     return result;
@@ -3708,11 +1767,13 @@ void DispatchDestroyBuffer(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroyBuffer(device, buffer, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t buffer_id = reinterpret_cast<uint64_t &>(buffer);
-    buffer = (VkBuffer)unique_id_mapping[buffer_id];
-    unique_id_mapping.erase(buffer_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(buffer_id);
+    if (iter != unique_id_mapping.end()) {
+        buffer = (VkBuffer)iter->second;
+    } else {
+        buffer = (VkBuffer)0;
+    }
     layer_data->device_dispatch_table.DestroyBuffer(device, buffer, pAllocator);
 
 }
@@ -3727,7 +1788,6 @@ VkResult DispatchCreateBufferView(
     if (!wrap_handles) return layer_data->device_dispatch_table.CreateBufferView(device, pCreateInfo, pAllocator, pView);
     safe_VkBufferViewCreateInfo *local_pCreateInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pCreateInfo) {
             local_pCreateInfo = new safe_VkBufferViewCreateInfo(pCreateInfo);
             if (pCreateInfo->buffer) {
@@ -3740,7 +1800,6 @@ VkResult DispatchCreateBufferView(
         delete local_pCreateInfo;
     }
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pView = layer_data->WrapNew(*pView);
     }
     return result;
@@ -3753,11 +1812,13 @@ void DispatchDestroyBufferView(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroyBufferView(device, bufferView, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t bufferView_id = reinterpret_cast<uint64_t &>(bufferView);
-    bufferView = (VkBufferView)unique_id_mapping[bufferView_id];
-    unique_id_mapping.erase(bufferView_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(bufferView_id);
+    if (iter != unique_id_mapping.end()) {
+        bufferView = (VkBufferView)iter->second;
+    } else {
+        bufferView = (VkBufferView)0;
+    }
     layer_data->device_dispatch_table.DestroyBufferView(device, bufferView, pAllocator);
 
 }
@@ -3772,19 +1833,16 @@ VkResult DispatchCreateImage(
     if (!wrap_handles) return layer_data->device_dispatch_table.CreateImage(device, pCreateInfo, pAllocator, pImage);
     safe_VkImageCreateInfo *local_pCreateInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pCreateInfo) {
             local_pCreateInfo = new safe_VkImageCreateInfo(pCreateInfo);
-            local_pCreateInfo->pNext = CreateUnwrappedExtensionStructs(layer_data, local_pCreateInfo->pNext);
+            WrapPnextChainHandles(layer_data, local_pCreateInfo->pNext);
         }
     }
     VkResult result = layer_data->device_dispatch_table.CreateImage(device, (const VkImageCreateInfo*)local_pCreateInfo, pAllocator, pImage);
     if (local_pCreateInfo) {
-        FreeUnwrappedExtensionStructs(const_cast<void *>(local_pCreateInfo->pNext));
         delete local_pCreateInfo;
     }
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pImage = layer_data->WrapNew(*pImage);
     }
     return result;
@@ -3797,11 +1855,13 @@ void DispatchDestroyImage(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroyImage(device, image, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t image_id = reinterpret_cast<uint64_t &>(image);
-    image = (VkImage)unique_id_mapping[image_id];
-    unique_id_mapping.erase(image_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(image_id);
+    if (iter != unique_id_mapping.end()) {
+        image = (VkImage)iter->second;
+    } else {
+        image = (VkImage)0;
+    }
     layer_data->device_dispatch_table.DestroyImage(device, image, pAllocator);
 
 }
@@ -3815,7 +1875,6 @@ void DispatchGetImageSubresourceLayout(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.GetImageSubresourceLayout(device, image, pSubresource, pLayout);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         image = layer_data->Unwrap(image);
     }
     layer_data->device_dispatch_table.GetImageSubresourceLayout(device, image, pSubresource, pLayout);
@@ -3832,22 +1891,19 @@ VkResult DispatchCreateImageView(
     if (!wrap_handles) return layer_data->device_dispatch_table.CreateImageView(device, pCreateInfo, pAllocator, pView);
     safe_VkImageViewCreateInfo *local_pCreateInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pCreateInfo) {
             local_pCreateInfo = new safe_VkImageViewCreateInfo(pCreateInfo);
             if (pCreateInfo->image) {
                 local_pCreateInfo->image = layer_data->Unwrap(pCreateInfo->image);
             }
-            local_pCreateInfo->pNext = CreateUnwrappedExtensionStructs(layer_data, local_pCreateInfo->pNext);
+            WrapPnextChainHandles(layer_data, local_pCreateInfo->pNext);
         }
     }
     VkResult result = layer_data->device_dispatch_table.CreateImageView(device, (const VkImageViewCreateInfo*)local_pCreateInfo, pAllocator, pView);
     if (local_pCreateInfo) {
-        FreeUnwrappedExtensionStructs(const_cast<void *>(local_pCreateInfo->pNext));
         delete local_pCreateInfo;
     }
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pView = layer_data->WrapNew(*pView);
     }
     return result;
@@ -3860,11 +1916,13 @@ void DispatchDestroyImageView(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroyImageView(device, imageView, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t imageView_id = reinterpret_cast<uint64_t &>(imageView);
-    imageView = (VkImageView)unique_id_mapping[imageView_id];
-    unique_id_mapping.erase(imageView_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(imageView_id);
+    if (iter != unique_id_mapping.end()) {
+        imageView = (VkImageView)iter->second;
+    } else {
+        imageView = (VkImageView)0;
+    }
     layer_data->device_dispatch_table.DestroyImageView(device, imageView, pAllocator);
 
 }
@@ -3879,19 +1937,16 @@ VkResult DispatchCreateShaderModule(
     if (!wrap_handles) return layer_data->device_dispatch_table.CreateShaderModule(device, pCreateInfo, pAllocator, pShaderModule);
     safe_VkShaderModuleCreateInfo *local_pCreateInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pCreateInfo) {
             local_pCreateInfo = new safe_VkShaderModuleCreateInfo(pCreateInfo);
-            local_pCreateInfo->pNext = CreateUnwrappedExtensionStructs(layer_data, local_pCreateInfo->pNext);
+            WrapPnextChainHandles(layer_data, local_pCreateInfo->pNext);
         }
     }
     VkResult result = layer_data->device_dispatch_table.CreateShaderModule(device, (const VkShaderModuleCreateInfo*)local_pCreateInfo, pAllocator, pShaderModule);
     if (local_pCreateInfo) {
-        FreeUnwrappedExtensionStructs(const_cast<void *>(local_pCreateInfo->pNext));
         delete local_pCreateInfo;
     }
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pShaderModule = layer_data->WrapNew(*pShaderModule);
     }
     return result;
@@ -3904,11 +1959,13 @@ void DispatchDestroyShaderModule(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroyShaderModule(device, shaderModule, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t shaderModule_id = reinterpret_cast<uint64_t &>(shaderModule);
-    shaderModule = (VkShaderModule)unique_id_mapping[shaderModule_id];
-    unique_id_mapping.erase(shaderModule_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(shaderModule_id);
+    if (iter != unique_id_mapping.end()) {
+        shaderModule = (VkShaderModule)iter->second;
+    } else {
+        shaderModule = (VkShaderModule)0;
+    }
     layer_data->device_dispatch_table.DestroyShaderModule(device, shaderModule, pAllocator);
 
 }
@@ -3923,7 +1980,6 @@ VkResult DispatchCreatePipelineCache(
     if (!wrap_handles) return layer_data->device_dispatch_table.CreatePipelineCache(device, pCreateInfo, pAllocator, pPipelineCache);
     VkResult result = layer_data->device_dispatch_table.CreatePipelineCache(device, pCreateInfo, pAllocator, pPipelineCache);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pPipelineCache = layer_data->WrapNew(*pPipelineCache);
     }
     return result;
@@ -3936,11 +1992,13 @@ void DispatchDestroyPipelineCache(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroyPipelineCache(device, pipelineCache, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t pipelineCache_id = reinterpret_cast<uint64_t &>(pipelineCache);
-    pipelineCache = (VkPipelineCache)unique_id_mapping[pipelineCache_id];
-    unique_id_mapping.erase(pipelineCache_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(pipelineCache_id);
+    if (iter != unique_id_mapping.end()) {
+        pipelineCache = (VkPipelineCache)iter->second;
+    } else {
+        pipelineCache = (VkPipelineCache)0;
+    }
     layer_data->device_dispatch_table.DestroyPipelineCache(device, pipelineCache, pAllocator);
 
 }
@@ -3954,7 +2012,6 @@ VkResult DispatchGetPipelineCacheData(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.GetPipelineCacheData(device, pipelineCache, pDataSize, pData);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         pipelineCache = layer_data->Unwrap(pipelineCache);
     }
     VkResult result = layer_data->device_dispatch_table.GetPipelineCacheData(device, pipelineCache, pDataSize, pData);
@@ -3972,7 +2029,6 @@ VkResult DispatchMergePipelineCaches(
     if (!wrap_handles) return layer_data->device_dispatch_table.MergePipelineCaches(device, dstCache, srcCacheCount, pSrcCaches);
     VkPipelineCache *local_pSrcCaches = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         dstCache = layer_data->Unwrap(dstCache);
         if (pSrcCaches) {
             local_pSrcCaches = new VkPipelineCache[srcCacheCount];
@@ -3998,11 +2054,13 @@ void DispatchDestroyPipeline(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroyPipeline(device, pipeline, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t pipeline_id = reinterpret_cast<uint64_t &>(pipeline);
-    pipeline = (VkPipeline)unique_id_mapping[pipeline_id];
-    unique_id_mapping.erase(pipeline_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(pipeline_id);
+    if (iter != unique_id_mapping.end()) {
+        pipeline = (VkPipeline)iter->second;
+    } else {
+        pipeline = (VkPipeline)0;
+    }
     layer_data->device_dispatch_table.DestroyPipeline(device, pipeline, pAllocator);
 
 }
@@ -4017,7 +2075,6 @@ VkResult DispatchCreatePipelineLayout(
     if (!wrap_handles) return layer_data->device_dispatch_table.CreatePipelineLayout(device, pCreateInfo, pAllocator, pPipelineLayout);
     safe_VkPipelineLayoutCreateInfo *local_pCreateInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pCreateInfo) {
             local_pCreateInfo = new safe_VkPipelineLayoutCreateInfo(pCreateInfo);
             if (local_pCreateInfo->pSetLayouts) {
@@ -4032,7 +2089,6 @@ VkResult DispatchCreatePipelineLayout(
         delete local_pCreateInfo;
     }
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pPipelineLayout = layer_data->WrapNew(*pPipelineLayout);
     }
     return result;
@@ -4045,11 +2101,13 @@ void DispatchDestroyPipelineLayout(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroyPipelineLayout(device, pipelineLayout, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t pipelineLayout_id = reinterpret_cast<uint64_t &>(pipelineLayout);
-    pipelineLayout = (VkPipelineLayout)unique_id_mapping[pipelineLayout_id];
-    unique_id_mapping.erase(pipelineLayout_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(pipelineLayout_id);
+    if (iter != unique_id_mapping.end()) {
+        pipelineLayout = (VkPipelineLayout)iter->second;
+    } else {
+        pipelineLayout = (VkPipelineLayout)0;
+    }
     layer_data->device_dispatch_table.DestroyPipelineLayout(device, pipelineLayout, pAllocator);
 
 }
@@ -4064,19 +2122,16 @@ VkResult DispatchCreateSampler(
     if (!wrap_handles) return layer_data->device_dispatch_table.CreateSampler(device, pCreateInfo, pAllocator, pSampler);
     safe_VkSamplerCreateInfo *local_pCreateInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pCreateInfo) {
             local_pCreateInfo = new safe_VkSamplerCreateInfo(pCreateInfo);
-            local_pCreateInfo->pNext = CreateUnwrappedExtensionStructs(layer_data, local_pCreateInfo->pNext);
+            WrapPnextChainHandles(layer_data, local_pCreateInfo->pNext);
         }
     }
     VkResult result = layer_data->device_dispatch_table.CreateSampler(device, (const VkSamplerCreateInfo*)local_pCreateInfo, pAllocator, pSampler);
     if (local_pCreateInfo) {
-        FreeUnwrappedExtensionStructs(const_cast<void *>(local_pCreateInfo->pNext));
         delete local_pCreateInfo;
     }
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pSampler = layer_data->WrapNew(*pSampler);
     }
     return result;
@@ -4089,11 +2144,13 @@ void DispatchDestroySampler(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroySampler(device, sampler, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t sampler_id = reinterpret_cast<uint64_t &>(sampler);
-    sampler = (VkSampler)unique_id_mapping[sampler_id];
-    unique_id_mapping.erase(sampler_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(sampler_id);
+    if (iter != unique_id_mapping.end()) {
+        sampler = (VkSampler)iter->second;
+    } else {
+        sampler = (VkSampler)0;
+    }
     layer_data->device_dispatch_table.DestroySampler(device, sampler, pAllocator);
 
 }
@@ -4108,7 +2165,6 @@ VkResult DispatchCreateDescriptorSetLayout(
     if (!wrap_handles) return layer_data->device_dispatch_table.CreateDescriptorSetLayout(device, pCreateInfo, pAllocator, pSetLayout);
     safe_VkDescriptorSetLayoutCreateInfo *local_pCreateInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pCreateInfo) {
             local_pCreateInfo = new safe_VkDescriptorSetLayoutCreateInfo(pCreateInfo);
             if (local_pCreateInfo->pBindings) {
@@ -4127,7 +2183,6 @@ VkResult DispatchCreateDescriptorSetLayout(
         delete local_pCreateInfo;
     }
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pSetLayout = layer_data->WrapNew(*pSetLayout);
     }
     return result;
@@ -4140,11 +2195,13 @@ void DispatchDestroyDescriptorSetLayout(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroyDescriptorSetLayout(device, descriptorSetLayout, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t descriptorSetLayout_id = reinterpret_cast<uint64_t &>(descriptorSetLayout);
-    descriptorSetLayout = (VkDescriptorSetLayout)unique_id_mapping[descriptorSetLayout_id];
-    unique_id_mapping.erase(descriptorSetLayout_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(descriptorSetLayout_id);
+    if (iter != unique_id_mapping.end()) {
+        descriptorSetLayout = (VkDescriptorSetLayout)iter->second;
+    } else {
+        descriptorSetLayout = (VkDescriptorSetLayout)0;
+    }
     layer_data->device_dispatch_table.DestroyDescriptorSetLayout(device, descriptorSetLayout, pAllocator);
 
 }
@@ -4159,7 +2216,6 @@ VkResult DispatchCreateDescriptorPool(
     if (!wrap_handles) return layer_data->device_dispatch_table.CreateDescriptorPool(device, pCreateInfo, pAllocator, pDescriptorPool);
     VkResult result = layer_data->device_dispatch_table.CreateDescriptorPool(device, pCreateInfo, pAllocator, pDescriptorPool);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pDescriptorPool = layer_data->WrapNew(*pDescriptorPool);
     }
     return result;
@@ -4185,12 +2241,11 @@ void DispatchUpdateDescriptorSets(
     safe_VkWriteDescriptorSet *local_pDescriptorWrites = NULL;
     safe_VkCopyDescriptorSet *local_pDescriptorCopies = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pDescriptorWrites) {
             local_pDescriptorWrites = new safe_VkWriteDescriptorSet[descriptorWriteCount];
             for (uint32_t index0 = 0; index0 < descriptorWriteCount; ++index0) {
                 local_pDescriptorWrites[index0].initialize(&pDescriptorWrites[index0]);
-                local_pDescriptorWrites[index0].pNext = CreateUnwrappedExtensionStructs(layer_data, local_pDescriptorWrites[index0].pNext);
+                WrapPnextChainHandles(layer_data, local_pDescriptorWrites[index0].pNext);
                 if (pDescriptorWrites[index0].dstSet) {
                     local_pDescriptorWrites[index0].dstSet = layer_data->Unwrap(pDescriptorWrites[index0].dstSet);
                 }
@@ -4233,9 +2288,6 @@ void DispatchUpdateDescriptorSets(
     }
     layer_data->device_dispatch_table.UpdateDescriptorSets(device, descriptorWriteCount, (const VkWriteDescriptorSet*)local_pDescriptorWrites, descriptorCopyCount, (const VkCopyDescriptorSet*)local_pDescriptorCopies);
     if (local_pDescriptorWrites) {
-        for (uint32_t index0 = 0; index0 < descriptorWriteCount; ++index0) {
-            FreeUnwrappedExtensionStructs(const_cast<void *>(local_pDescriptorWrites[index0].pNext));
-        }
         delete[] local_pDescriptorWrites;
     }
     if (local_pDescriptorCopies) {
@@ -4253,7 +2305,6 @@ VkResult DispatchCreateFramebuffer(
     if (!wrap_handles) return layer_data->device_dispatch_table.CreateFramebuffer(device, pCreateInfo, pAllocator, pFramebuffer);
     safe_VkFramebufferCreateInfo *local_pCreateInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pCreateInfo) {
             local_pCreateInfo = new safe_VkFramebufferCreateInfo(pCreateInfo);
             if (pCreateInfo->renderPass) {
@@ -4271,7 +2322,6 @@ VkResult DispatchCreateFramebuffer(
         delete local_pCreateInfo;
     }
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pFramebuffer = layer_data->WrapNew(*pFramebuffer);
     }
     return result;
@@ -4284,11 +2334,13 @@ void DispatchDestroyFramebuffer(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroyFramebuffer(device, framebuffer, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t framebuffer_id = reinterpret_cast<uint64_t &>(framebuffer);
-    framebuffer = (VkFramebuffer)unique_id_mapping[framebuffer_id];
-    unique_id_mapping.erase(framebuffer_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(framebuffer_id);
+    if (iter != unique_id_mapping.end()) {
+        framebuffer = (VkFramebuffer)iter->second;
+    } else {
+        framebuffer = (VkFramebuffer)0;
+    }
     layer_data->device_dispatch_table.DestroyFramebuffer(device, framebuffer, pAllocator);
 
 }
@@ -4305,7 +2357,6 @@ void DispatchGetRenderAreaGranularity(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.GetRenderAreaGranularity(device, renderPass, pGranularity);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         renderPass = layer_data->Unwrap(renderPass);
     }
     layer_data->device_dispatch_table.GetRenderAreaGranularity(device, renderPass, pGranularity);
@@ -4322,7 +2373,6 @@ VkResult DispatchCreateCommandPool(
     if (!wrap_handles) return layer_data->device_dispatch_table.CreateCommandPool(device, pCreateInfo, pAllocator, pCommandPool);
     VkResult result = layer_data->device_dispatch_table.CreateCommandPool(device, pCreateInfo, pAllocator, pCommandPool);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pCommandPool = layer_data->WrapNew(*pCommandPool);
     }
     return result;
@@ -4335,11 +2385,13 @@ void DispatchDestroyCommandPool(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroyCommandPool(device, commandPool, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t commandPool_id = reinterpret_cast<uint64_t &>(commandPool);
-    commandPool = (VkCommandPool)unique_id_mapping[commandPool_id];
-    unique_id_mapping.erase(commandPool_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(commandPool_id);
+    if (iter != unique_id_mapping.end()) {
+        commandPool = (VkCommandPool)iter->second;
+    } else {
+        commandPool = (VkCommandPool)0;
+    }
     layer_data->device_dispatch_table.DestroyCommandPool(device, commandPool, pAllocator);
 
 }
@@ -4352,7 +2404,6 @@ VkResult DispatchResetCommandPool(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.ResetCommandPool(device, commandPool, flags);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         commandPool = layer_data->Unwrap(commandPool);
     }
     VkResult result = layer_data->device_dispatch_table.ResetCommandPool(device, commandPool, flags);
@@ -4369,7 +2420,6 @@ VkResult DispatchAllocateCommandBuffers(
     if (!wrap_handles) return layer_data->device_dispatch_table.AllocateCommandBuffers(device, pAllocateInfo, pCommandBuffers);
     safe_VkCommandBufferAllocateInfo *local_pAllocateInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pAllocateInfo) {
             local_pAllocateInfo = new safe_VkCommandBufferAllocateInfo(pAllocateInfo);
             if (pAllocateInfo->commandPool) {
@@ -4393,7 +2443,6 @@ void DispatchFreeCommandBuffers(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.FreeCommandBuffers(device, commandPool, commandBufferCount, pCommandBuffers);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         commandPool = layer_data->Unwrap(commandPool);
     }
     layer_data->device_dispatch_table.FreeCommandBuffers(device, commandPool, commandBufferCount, pCommandBuffers);
@@ -4408,7 +2457,6 @@ VkResult DispatchBeginCommandBuffer(
     if (!wrap_handles) return layer_data->device_dispatch_table.BeginCommandBuffer(commandBuffer, pBeginInfo);
     safe_VkCommandBufferBeginInfo *local_pBeginInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pBeginInfo) {
             local_pBeginInfo = new safe_VkCommandBufferBeginInfo(pBeginInfo);
             if (local_pBeginInfo->pInheritanceInfo) {
@@ -4455,7 +2503,6 @@ void DispatchCmdBindPipeline(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdBindPipeline(commandBuffer, pipelineBindPoint, pipeline);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         pipeline = layer_data->Unwrap(pipeline);
     }
     layer_data->device_dispatch_table.CmdBindPipeline(commandBuffer, pipelineBindPoint, pipeline);
@@ -4567,7 +2614,6 @@ void DispatchCmdBindDescriptorSets(
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdBindDescriptorSets(commandBuffer, pipelineBindPoint, layout, firstSet, descriptorSetCount, pDescriptorSets, dynamicOffsetCount, pDynamicOffsets);
     VkDescriptorSet *local_pDescriptorSets = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         layout = layer_data->Unwrap(layout);
         if (pDescriptorSets) {
             local_pDescriptorSets = new VkDescriptorSet[descriptorSetCount];
@@ -4590,7 +2636,6 @@ void DispatchCmdBindIndexBuffer(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdBindIndexBuffer(commandBuffer, buffer, offset, indexType);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         buffer = layer_data->Unwrap(buffer);
     }
     layer_data->device_dispatch_table.CmdBindIndexBuffer(commandBuffer, buffer, offset, indexType);
@@ -4608,7 +2653,6 @@ void DispatchCmdBindVertexBuffers(
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdBindVertexBuffers(commandBuffer, firstBinding, bindingCount, pBuffers, pOffsets);
     VkBuffer *local_pBuffers = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pBuffers) {
             local_pBuffers = new VkBuffer[bindingCount];
             for (uint32_t index0 = 0; index0 < bindingCount; ++index0) {
@@ -4656,7 +2700,6 @@ void DispatchCmdDrawIndirect(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdDrawIndirect(commandBuffer, buffer, offset, drawCount, stride);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         buffer = layer_data->Unwrap(buffer);
     }
     layer_data->device_dispatch_table.CmdDrawIndirect(commandBuffer, buffer, offset, drawCount, stride);
@@ -4673,7 +2716,6 @@ void DispatchCmdDrawIndexedIndirect(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdDrawIndexedIndirect(commandBuffer, buffer, offset, drawCount, stride);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         buffer = layer_data->Unwrap(buffer);
     }
     layer_data->device_dispatch_table.CmdDrawIndexedIndirect(commandBuffer, buffer, offset, drawCount, stride);
@@ -4699,7 +2741,6 @@ void DispatchCmdDispatchIndirect(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdDispatchIndirect(commandBuffer, buffer, offset);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         buffer = layer_data->Unwrap(buffer);
     }
     layer_data->device_dispatch_table.CmdDispatchIndirect(commandBuffer, buffer, offset);
@@ -4716,7 +2757,6 @@ void DispatchCmdCopyBuffer(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, regionCount, pRegions);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         srcBuffer = layer_data->Unwrap(srcBuffer);
         dstBuffer = layer_data->Unwrap(dstBuffer);
     }
@@ -4736,7 +2776,6 @@ void DispatchCmdCopyImage(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdCopyImage(commandBuffer, srcImage, srcImageLayout, dstImage, dstImageLayout, regionCount, pRegions);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         srcImage = layer_data->Unwrap(srcImage);
         dstImage = layer_data->Unwrap(dstImage);
     }
@@ -4757,7 +2796,6 @@ void DispatchCmdBlitImage(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdBlitImage(commandBuffer, srcImage, srcImageLayout, dstImage, dstImageLayout, regionCount, pRegions, filter);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         srcImage = layer_data->Unwrap(srcImage);
         dstImage = layer_data->Unwrap(dstImage);
     }
@@ -4776,7 +2814,6 @@ void DispatchCmdCopyBufferToImage(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdCopyBufferToImage(commandBuffer, srcBuffer, dstImage, dstImageLayout, regionCount, pRegions);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         srcBuffer = layer_data->Unwrap(srcBuffer);
         dstImage = layer_data->Unwrap(dstImage);
     }
@@ -4795,7 +2832,6 @@ void DispatchCmdCopyImageToBuffer(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdCopyImageToBuffer(commandBuffer, srcImage, srcImageLayout, dstBuffer, regionCount, pRegions);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         srcImage = layer_data->Unwrap(srcImage);
         dstBuffer = layer_data->Unwrap(dstBuffer);
     }
@@ -4813,7 +2849,6 @@ void DispatchCmdUpdateBuffer(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdUpdateBuffer(commandBuffer, dstBuffer, dstOffset, dataSize, pData);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         dstBuffer = layer_data->Unwrap(dstBuffer);
     }
     layer_data->device_dispatch_table.CmdUpdateBuffer(commandBuffer, dstBuffer, dstOffset, dataSize, pData);
@@ -4830,7 +2865,6 @@ void DispatchCmdFillBuffer(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdFillBuffer(commandBuffer, dstBuffer, dstOffset, size, data);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         dstBuffer = layer_data->Unwrap(dstBuffer);
     }
     layer_data->device_dispatch_table.CmdFillBuffer(commandBuffer, dstBuffer, dstOffset, size, data);
@@ -4848,7 +2882,6 @@ void DispatchCmdClearColorImage(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdClearColorImage(commandBuffer, image, imageLayout, pColor, rangeCount, pRanges);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         image = layer_data->Unwrap(image);
     }
     layer_data->device_dispatch_table.CmdClearColorImage(commandBuffer, image, imageLayout, pColor, rangeCount, pRanges);
@@ -4866,7 +2899,6 @@ void DispatchCmdClearDepthStencilImage(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdClearDepthStencilImage(commandBuffer, image, imageLayout, pDepthStencil, rangeCount, pRanges);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         image = layer_data->Unwrap(image);
     }
     layer_data->device_dispatch_table.CmdClearDepthStencilImage(commandBuffer, image, imageLayout, pDepthStencil, rangeCount, pRanges);
@@ -4897,7 +2929,6 @@ void DispatchCmdResolveImage(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdResolveImage(commandBuffer, srcImage, srcImageLayout, dstImage, dstImageLayout, regionCount, pRegions);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         srcImage = layer_data->Unwrap(srcImage);
         dstImage = layer_data->Unwrap(dstImage);
     }
@@ -4913,7 +2944,6 @@ void DispatchCmdSetEvent(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdSetEvent(commandBuffer, event, stageMask);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         event = layer_data->Unwrap(event);
     }
     layer_data->device_dispatch_table.CmdSetEvent(commandBuffer, event, stageMask);
@@ -4928,7 +2958,6 @@ void DispatchCmdResetEvent(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdResetEvent(commandBuffer, event, stageMask);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         event = layer_data->Unwrap(event);
     }
     layer_data->device_dispatch_table.CmdResetEvent(commandBuffer, event, stageMask);
@@ -4954,7 +2983,6 @@ void DispatchCmdWaitEvents(
     safe_VkBufferMemoryBarrier *local_pBufferMemoryBarriers = NULL;
     safe_VkImageMemoryBarrier *local_pImageMemoryBarriers = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pEvents) {
             local_pEvents = new VkEvent[eventCount];
             for (uint32_t index0 = 0; index0 < eventCount; ++index0) {
@@ -5008,7 +3036,6 @@ void DispatchCmdPipelineBarrier(
     safe_VkBufferMemoryBarrier *local_pBufferMemoryBarriers = NULL;
     safe_VkImageMemoryBarrier *local_pImageMemoryBarriers = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pBufferMemoryBarriers) {
             local_pBufferMemoryBarriers = new safe_VkBufferMemoryBarrier[bufferMemoryBarrierCount];
             for (uint32_t index0 = 0; index0 < bufferMemoryBarrierCount; ++index0) {
@@ -5046,7 +3073,6 @@ void DispatchCmdBeginQuery(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdBeginQuery(commandBuffer, queryPool, query, flags);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         queryPool = layer_data->Unwrap(queryPool);
     }
     layer_data->device_dispatch_table.CmdBeginQuery(commandBuffer, queryPool, query, flags);
@@ -5061,7 +3087,6 @@ void DispatchCmdEndQuery(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdEndQuery(commandBuffer, queryPool, query);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         queryPool = layer_data->Unwrap(queryPool);
     }
     layer_data->device_dispatch_table.CmdEndQuery(commandBuffer, queryPool, query);
@@ -5077,7 +3102,6 @@ void DispatchCmdResetQueryPool(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdResetQueryPool(commandBuffer, queryPool, firstQuery, queryCount);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         queryPool = layer_data->Unwrap(queryPool);
     }
     layer_data->device_dispatch_table.CmdResetQueryPool(commandBuffer, queryPool, firstQuery, queryCount);
@@ -5093,7 +3117,6 @@ void DispatchCmdWriteTimestamp(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdWriteTimestamp(commandBuffer, pipelineStage, queryPool, query);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         queryPool = layer_data->Unwrap(queryPool);
     }
     layer_data->device_dispatch_table.CmdWriteTimestamp(commandBuffer, pipelineStage, queryPool, query);
@@ -5113,7 +3136,6 @@ void DispatchCmdCopyQueryPoolResults(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdCopyQueryPoolResults(commandBuffer, queryPool, firstQuery, queryCount, dstBuffer, dstOffset, stride, flags);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         queryPool = layer_data->Unwrap(queryPool);
         dstBuffer = layer_data->Unwrap(dstBuffer);
     }
@@ -5132,7 +3154,6 @@ void DispatchCmdPushConstants(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdPushConstants(commandBuffer, layout, stageFlags, offset, size, pValues);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         layout = layer_data->Unwrap(layout);
     }
     layer_data->device_dispatch_table.CmdPushConstants(commandBuffer, layout, stageFlags, offset, size, pValues);
@@ -5148,7 +3169,6 @@ void DispatchCmdBeginRenderPass(
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdBeginRenderPass(commandBuffer, pRenderPassBegin, contents);
     safe_VkRenderPassBeginInfo *local_pRenderPassBegin = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pRenderPassBegin) {
             local_pRenderPassBegin = new safe_VkRenderPassBeginInfo(pRenderPassBegin);
             if (pRenderPassBegin->renderPass) {
@@ -5157,12 +3177,11 @@ void DispatchCmdBeginRenderPass(
             if (pRenderPassBegin->framebuffer) {
                 local_pRenderPassBegin->framebuffer = layer_data->Unwrap(pRenderPassBegin->framebuffer);
             }
-            local_pRenderPassBegin->pNext = CreateUnwrappedExtensionStructs(layer_data, local_pRenderPassBegin->pNext);
+            WrapPnextChainHandles(layer_data, local_pRenderPassBegin->pNext);
         }
     }
     layer_data->device_dispatch_table.CmdBeginRenderPass(commandBuffer, (const VkRenderPassBeginInfo*)local_pRenderPassBegin, contents);
     if (local_pRenderPassBegin) {
-        FreeUnwrappedExtensionStructs(const_cast<void *>(local_pRenderPassBegin->pNext));
         delete local_pRenderPassBegin;
     }
 }
@@ -5205,7 +3224,6 @@ VkResult DispatchBindBufferMemory2(
     if (!wrap_handles) return layer_data->device_dispatch_table.BindBufferMemory2(device, bindInfoCount, pBindInfos);
     safe_VkBindBufferMemoryInfo *local_pBindInfos = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pBindInfos) {
             local_pBindInfos = new safe_VkBindBufferMemoryInfo[bindInfoCount];
             for (uint32_t index0 = 0; index0 < bindInfoCount; ++index0) {
@@ -5235,12 +3253,11 @@ VkResult DispatchBindImageMemory2(
     if (!wrap_handles) return layer_data->device_dispatch_table.BindImageMemory2(device, bindInfoCount, pBindInfos);
     safe_VkBindImageMemoryInfo *local_pBindInfos = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pBindInfos) {
             local_pBindInfos = new safe_VkBindImageMemoryInfo[bindInfoCount];
             for (uint32_t index0 = 0; index0 < bindInfoCount; ++index0) {
                 local_pBindInfos[index0].initialize(&pBindInfos[index0]);
-                local_pBindInfos[index0].pNext = CreateUnwrappedExtensionStructs(layer_data, local_pBindInfos[index0].pNext);
+                WrapPnextChainHandles(layer_data, local_pBindInfos[index0].pNext);
                 if (pBindInfos[index0].image) {
                     local_pBindInfos[index0].image = layer_data->Unwrap(pBindInfos[index0].image);
                 }
@@ -5252,9 +3269,6 @@ VkResult DispatchBindImageMemory2(
     }
     VkResult result = layer_data->device_dispatch_table.BindImageMemory2(device, bindInfoCount, (const VkBindImageMemoryInfo*)local_pBindInfos);
     if (local_pBindInfos) {
-        for (uint32_t index0 = 0; index0 < bindInfoCount; ++index0) {
-            FreeUnwrappedExtensionStructs(const_cast<void *>(local_pBindInfos[index0].pNext));
-        }
         delete[] local_pBindInfos;
     }
     return result;
@@ -5315,7 +3329,6 @@ void DispatchGetImageMemoryRequirements2(
     if (!wrap_handles) return layer_data->device_dispatch_table.GetImageMemoryRequirements2(device, pInfo, pMemoryRequirements);
     safe_VkImageMemoryRequirementsInfo2 *local_pInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pInfo) {
             local_pInfo = new safe_VkImageMemoryRequirementsInfo2(pInfo);
             if (pInfo->image) {
@@ -5338,7 +3351,6 @@ void DispatchGetBufferMemoryRequirements2(
     if (!wrap_handles) return layer_data->device_dispatch_table.GetBufferMemoryRequirements2(device, pInfo, pMemoryRequirements);
     safe_VkBufferMemoryRequirementsInfo2 *local_pInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pInfo) {
             local_pInfo = new safe_VkBufferMemoryRequirementsInfo2(pInfo);
             if (pInfo->buffer) {
@@ -5362,7 +3374,6 @@ void DispatchGetImageSparseMemoryRequirements2(
     if (!wrap_handles) return layer_data->device_dispatch_table.GetImageSparseMemoryRequirements2(device, pInfo, pSparseMemoryRequirementCount, pSparseMemoryRequirements);
     safe_VkImageSparseMemoryRequirementsInfo2 *local_pInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pInfo) {
             local_pInfo = new safe_VkImageSparseMemoryRequirementsInfo2(pInfo);
             if (pInfo->image) {
@@ -5413,15 +3424,13 @@ VkResult DispatchGetPhysicalDeviceImageFormatProperties2(
     if (!wrap_handles) return layer_data->instance_dispatch_table.GetPhysicalDeviceImageFormatProperties2(physicalDevice, pImageFormatInfo, pImageFormatProperties);
     safe_VkPhysicalDeviceImageFormatInfo2 *local_pImageFormatInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pImageFormatInfo) {
             local_pImageFormatInfo = new safe_VkPhysicalDeviceImageFormatInfo2(pImageFormatInfo);
-            local_pImageFormatInfo->pNext = CreateUnwrappedExtensionStructs(layer_data, local_pImageFormatInfo->pNext);
+            WrapPnextChainHandles(layer_data, local_pImageFormatInfo->pNext);
         }
     }
     VkResult result = layer_data->instance_dispatch_table.GetPhysicalDeviceImageFormatProperties2(physicalDevice, (const VkPhysicalDeviceImageFormatInfo2*)local_pImageFormatInfo, pImageFormatProperties);
     if (local_pImageFormatInfo) {
-        FreeUnwrappedExtensionStructs(const_cast<void *>(local_pImageFormatInfo->pNext));
         delete local_pImageFormatInfo;
     }
     return result;
@@ -5465,7 +3474,6 @@ void DispatchTrimCommandPool(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.TrimCommandPool(device, commandPool, flags);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         commandPool = layer_data->Unwrap(commandPool);
     }
     layer_data->device_dispatch_table.TrimCommandPool(device, commandPool, flags);
@@ -5492,19 +3500,16 @@ VkResult DispatchCreateSamplerYcbcrConversion(
     if (!wrap_handles) return layer_data->device_dispatch_table.CreateSamplerYcbcrConversion(device, pCreateInfo, pAllocator, pYcbcrConversion);
     safe_VkSamplerYcbcrConversionCreateInfo *local_pCreateInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pCreateInfo) {
             local_pCreateInfo = new safe_VkSamplerYcbcrConversionCreateInfo(pCreateInfo);
-            local_pCreateInfo->pNext = CreateUnwrappedExtensionStructs(layer_data, local_pCreateInfo->pNext);
+            WrapPnextChainHandles(layer_data, local_pCreateInfo->pNext);
         }
     }
     VkResult result = layer_data->device_dispatch_table.CreateSamplerYcbcrConversion(device, (const VkSamplerYcbcrConversionCreateInfo*)local_pCreateInfo, pAllocator, pYcbcrConversion);
     if (local_pCreateInfo) {
-        FreeUnwrappedExtensionStructs(const_cast<void *>(local_pCreateInfo->pNext));
         delete local_pCreateInfo;
     }
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pYcbcrConversion = layer_data->WrapNew(*pYcbcrConversion);
     }
     return result;
@@ -5517,11 +3522,13 @@ void DispatchDestroySamplerYcbcrConversion(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroySamplerYcbcrConversion(device, ycbcrConversion, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t ycbcrConversion_id = reinterpret_cast<uint64_t &>(ycbcrConversion);
-    ycbcrConversion = (VkSamplerYcbcrConversion)unique_id_mapping[ycbcrConversion_id];
-    unique_id_mapping.erase(ycbcrConversion_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(ycbcrConversion_id);
+    if (iter != unique_id_mapping.end()) {
+        ycbcrConversion = (VkSamplerYcbcrConversion)iter->second;
+    } else {
+        ycbcrConversion = (VkSamplerYcbcrConversion)0;
+    }
     layer_data->device_dispatch_table.DestroySamplerYcbcrConversion(device, ycbcrConversion, pAllocator);
 
 }
@@ -5571,7 +3578,6 @@ void DispatchGetDescriptorSetLayoutSupport(
     if (!wrap_handles) return layer_data->device_dispatch_table.GetDescriptorSetLayoutSupport(device, pCreateInfo, pSupport);
     safe_VkDescriptorSetLayoutCreateInfo *local_pCreateInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pCreateInfo) {
             local_pCreateInfo = new safe_VkDescriptorSetLayoutCreateInfo(pCreateInfo);
             if (local_pCreateInfo->pBindings) {
@@ -5598,11 +3604,13 @@ void DispatchDestroySurfaceKHR(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(instance), layer_data_map);
     if (!wrap_handles) return layer_data->instance_dispatch_table.DestroySurfaceKHR(instance, surface, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t surface_id = reinterpret_cast<uint64_t &>(surface);
-    surface = (VkSurfaceKHR)unique_id_mapping[surface_id];
-    unique_id_mapping.erase(surface_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(surface_id);
+    if (iter != unique_id_mapping.end()) {
+        surface = (VkSurfaceKHR)iter->second;
+    } else {
+        surface = (VkSurfaceKHR)0;
+    }
     layer_data->instance_dispatch_table.DestroySurfaceKHR(instance, surface, pAllocator);
 
 }
@@ -5616,7 +3624,6 @@ VkResult DispatchGetPhysicalDeviceSurfaceSupportKHR(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(physicalDevice), layer_data_map);
     if (!wrap_handles) return layer_data->instance_dispatch_table.GetPhysicalDeviceSurfaceSupportKHR(physicalDevice, queueFamilyIndex, surface, pSupported);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         surface = layer_data->Unwrap(surface);
     }
     VkResult result = layer_data->instance_dispatch_table.GetPhysicalDeviceSurfaceSupportKHR(physicalDevice, queueFamilyIndex, surface, pSupported);
@@ -5632,7 +3639,6 @@ VkResult DispatchGetPhysicalDeviceSurfaceCapabilitiesKHR(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(physicalDevice), layer_data_map);
     if (!wrap_handles) return layer_data->instance_dispatch_table.GetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, pSurfaceCapabilities);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         surface = layer_data->Unwrap(surface);
     }
     VkResult result = layer_data->instance_dispatch_table.GetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, pSurfaceCapabilities);
@@ -5649,7 +3655,6 @@ VkResult DispatchGetPhysicalDeviceSurfaceFormatsKHR(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(physicalDevice), layer_data_map);
     if (!wrap_handles) return layer_data->instance_dispatch_table.GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, pSurfaceFormatCount, pSurfaceFormats);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         surface = layer_data->Unwrap(surface);
     }
     VkResult result = layer_data->instance_dispatch_table.GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, pSurfaceFormatCount, pSurfaceFormats);
@@ -5666,7 +3671,6 @@ VkResult DispatchGetPhysicalDeviceSurfacePresentModesKHR(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(physicalDevice), layer_data_map);
     if (!wrap_handles) return layer_data->instance_dispatch_table.GetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, pPresentModeCount, pPresentModes);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         surface = layer_data->Unwrap(surface);
     }
     VkResult result = layer_data->instance_dispatch_table.GetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, pPresentModeCount, pPresentModes);
@@ -5691,7 +3695,6 @@ VkResult DispatchAcquireNextImageKHR(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.AcquireNextImageKHR(device, swapchain, timeout, semaphore, fence, pImageIndex);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         swapchain = layer_data->Unwrap(swapchain);
         semaphore = layer_data->Unwrap(semaphore);
         fence = layer_data->Unwrap(fence);
@@ -5721,7 +3724,6 @@ VkResult DispatchGetDeviceGroupSurfacePresentModesKHR(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.GetDeviceGroupSurfacePresentModesKHR(device, surface, pModes);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         surface = layer_data->Unwrap(surface);
     }
     VkResult result = layer_data->device_dispatch_table.GetDeviceGroupSurfacePresentModesKHR(device, surface, pModes);
@@ -5738,7 +3740,6 @@ VkResult DispatchGetPhysicalDevicePresentRectanglesKHR(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(physicalDevice), layer_data_map);
     if (!wrap_handles) return layer_data->instance_dispatch_table.GetPhysicalDevicePresentRectanglesKHR(physicalDevice, surface, pRectCount, pRects);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         surface = layer_data->Unwrap(surface);
     }
     VkResult result = layer_data->instance_dispatch_table.GetPhysicalDevicePresentRectanglesKHR(physicalDevice, surface, pRectCount, pRects);
@@ -5755,7 +3756,6 @@ VkResult DispatchAcquireNextImage2KHR(
     if (!wrap_handles) return layer_data->device_dispatch_table.AcquireNextImage2KHR(device, pAcquireInfo, pImageIndex);
     safe_VkAcquireNextImageInfoKHR *local_pAcquireInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pAcquireInfo) {
             local_pAcquireInfo = new safe_VkAcquireNextImageInfoKHR(pAcquireInfo);
             if (pAcquireInfo->swapchain) {
@@ -5794,12 +3794,10 @@ VkResult DispatchCreateDisplayModeKHR(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(physicalDevice), layer_data_map);
     if (!wrap_handles) return layer_data->instance_dispatch_table.CreateDisplayModeKHR(physicalDevice, display, pCreateInfo, pAllocator, pMode);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         display = layer_data->Unwrap(display);
     }
     VkResult result = layer_data->instance_dispatch_table.CreateDisplayModeKHR(physicalDevice, display, pCreateInfo, pAllocator, pMode);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pMode = layer_data->WrapNew(*pMode);
     }
     return result;
@@ -5814,7 +3812,6 @@ VkResult DispatchGetDisplayPlaneCapabilitiesKHR(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(physicalDevice), layer_data_map);
     if (!wrap_handles) return layer_data->instance_dispatch_table.GetDisplayPlaneCapabilitiesKHR(physicalDevice, mode, planeIndex, pCapabilities);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         mode = layer_data->Unwrap(mode);
     }
     VkResult result = layer_data->instance_dispatch_table.GetDisplayPlaneCapabilitiesKHR(physicalDevice, mode, planeIndex, pCapabilities);
@@ -5832,7 +3829,6 @@ VkResult DispatchCreateDisplayPlaneSurfaceKHR(
     if (!wrap_handles) return layer_data->instance_dispatch_table.CreateDisplayPlaneSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
     safe_VkDisplaySurfaceCreateInfoKHR *local_pCreateInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pCreateInfo) {
             local_pCreateInfo = new safe_VkDisplaySurfaceCreateInfoKHR(pCreateInfo);
             if (pCreateInfo->displayMode) {
@@ -5845,7 +3841,6 @@ VkResult DispatchCreateDisplayPlaneSurfaceKHR(
         delete local_pCreateInfo;
     }
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pSurface = layer_data->WrapNew(*pSurface);
     }
     return result;
@@ -5865,7 +3860,6 @@ VkResult DispatchCreateXlibSurfaceKHR(
     if (!wrap_handles) return layer_data->instance_dispatch_table.CreateXlibSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
     VkResult result = layer_data->instance_dispatch_table.CreateXlibSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pSurface = layer_data->WrapNew(*pSurface);
     }
     return result;
@@ -5899,7 +3893,6 @@ VkResult DispatchCreateXcbSurfaceKHR(
     if (!wrap_handles) return layer_data->instance_dispatch_table.CreateXcbSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
     VkResult result = layer_data->instance_dispatch_table.CreateXcbSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pSurface = layer_data->WrapNew(*pSurface);
     }
     return result;
@@ -5933,7 +3926,6 @@ VkResult DispatchCreateWaylandSurfaceKHR(
     if (!wrap_handles) return layer_data->instance_dispatch_table.CreateWaylandSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
     VkResult result = layer_data->instance_dispatch_table.CreateWaylandSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pSurface = layer_data->WrapNew(*pSurface);
     }
     return result;
@@ -5966,7 +3958,6 @@ VkResult DispatchCreateAndroidSurfaceKHR(
     if (!wrap_handles) return layer_data->instance_dispatch_table.CreateAndroidSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
     VkResult result = layer_data->instance_dispatch_table.CreateAndroidSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pSurface = layer_data->WrapNew(*pSurface);
     }
     return result;
@@ -5985,7 +3976,6 @@ VkResult DispatchCreateWin32SurfaceKHR(
     if (!wrap_handles) return layer_data->instance_dispatch_table.CreateWin32SurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
     VkResult result = layer_data->instance_dispatch_table.CreateWin32SurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pSurface = layer_data->WrapNew(*pSurface);
     }
     return result;
@@ -6042,15 +4032,13 @@ VkResult DispatchGetPhysicalDeviceImageFormatProperties2KHR(
     if (!wrap_handles) return layer_data->instance_dispatch_table.GetPhysicalDeviceImageFormatProperties2KHR(physicalDevice, pImageFormatInfo, pImageFormatProperties);
     safe_VkPhysicalDeviceImageFormatInfo2 *local_pImageFormatInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pImageFormatInfo) {
             local_pImageFormatInfo = new safe_VkPhysicalDeviceImageFormatInfo2(pImageFormatInfo);
-            local_pImageFormatInfo->pNext = CreateUnwrappedExtensionStructs(layer_data, local_pImageFormatInfo->pNext);
+            WrapPnextChainHandles(layer_data, local_pImageFormatInfo->pNext);
         }
     }
     VkResult result = layer_data->instance_dispatch_table.GetPhysicalDeviceImageFormatProperties2KHR(physicalDevice, (const VkPhysicalDeviceImageFormatInfo2*)local_pImageFormatInfo, pImageFormatProperties);
     if (local_pImageFormatInfo) {
-        FreeUnwrappedExtensionStructs(const_cast<void *>(local_pImageFormatInfo->pNext));
         delete local_pImageFormatInfo;
     }
     return result;
@@ -6129,7 +4117,6 @@ void DispatchTrimCommandPoolKHR(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.TrimCommandPoolKHR(device, commandPool, flags);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         commandPool = layer_data->Unwrap(commandPool);
     }
     layer_data->device_dispatch_table.TrimCommandPoolKHR(device, commandPool, flags);
@@ -6168,7 +4155,6 @@ VkResult DispatchGetMemoryWin32HandleKHR(
     if (!wrap_handles) return layer_data->device_dispatch_table.GetMemoryWin32HandleKHR(device, pGetWin32HandleInfo, pHandle);
     safe_VkMemoryGetWin32HandleInfoKHR *local_pGetWin32HandleInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pGetWin32HandleInfo) {
             local_pGetWin32HandleInfo = new safe_VkMemoryGetWin32HandleInfoKHR(pGetWin32HandleInfo);
             if (pGetWin32HandleInfo->memory) {
@@ -6208,7 +4194,6 @@ VkResult DispatchGetMemoryFdKHR(
     if (!wrap_handles) return layer_data->device_dispatch_table.GetMemoryFdKHR(device, pGetFdInfo, pFd);
     safe_VkMemoryGetFdInfoKHR *local_pGetFdInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pGetFdInfo) {
             local_pGetFdInfo = new safe_VkMemoryGetFdInfoKHR(pGetFdInfo);
             if (pGetFdInfo->memory) {
@@ -6255,7 +4240,6 @@ VkResult DispatchImportSemaphoreWin32HandleKHR(
     if (!wrap_handles) return layer_data->device_dispatch_table.ImportSemaphoreWin32HandleKHR(device, pImportSemaphoreWin32HandleInfo);
     safe_VkImportSemaphoreWin32HandleInfoKHR *local_pImportSemaphoreWin32HandleInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pImportSemaphoreWin32HandleInfo) {
             local_pImportSemaphoreWin32HandleInfo = new safe_VkImportSemaphoreWin32HandleInfoKHR(pImportSemaphoreWin32HandleInfo);
             if (pImportSemaphoreWin32HandleInfo->semaphore) {
@@ -6282,7 +4266,6 @@ VkResult DispatchGetSemaphoreWin32HandleKHR(
     if (!wrap_handles) return layer_data->device_dispatch_table.GetSemaphoreWin32HandleKHR(device, pGetWin32HandleInfo, pHandle);
     safe_VkSemaphoreGetWin32HandleInfoKHR *local_pGetWin32HandleInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pGetWin32HandleInfo) {
             local_pGetWin32HandleInfo = new safe_VkSemaphoreGetWin32HandleInfoKHR(pGetWin32HandleInfo);
             if (pGetWin32HandleInfo->semaphore) {
@@ -6306,7 +4289,6 @@ VkResult DispatchImportSemaphoreFdKHR(
     if (!wrap_handles) return layer_data->device_dispatch_table.ImportSemaphoreFdKHR(device, pImportSemaphoreFdInfo);
     safe_VkImportSemaphoreFdInfoKHR *local_pImportSemaphoreFdInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pImportSemaphoreFdInfo) {
             local_pImportSemaphoreFdInfo = new safe_VkImportSemaphoreFdInfoKHR(pImportSemaphoreFdInfo);
             if (pImportSemaphoreFdInfo->semaphore) {
@@ -6330,7 +4312,6 @@ VkResult DispatchGetSemaphoreFdKHR(
     if (!wrap_handles) return layer_data->device_dispatch_table.GetSemaphoreFdKHR(device, pGetFdInfo, pFd);
     safe_VkSemaphoreGetFdInfoKHR *local_pGetFdInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pGetFdInfo) {
             local_pGetFdInfo = new safe_VkSemaphoreGetFdInfoKHR(pGetFdInfo);
             if (pGetFdInfo->semaphore) {
@@ -6357,13 +4338,12 @@ void DispatchCmdPushDescriptorSetKHR(
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdPushDescriptorSetKHR(commandBuffer, pipelineBindPoint, layout, set, descriptorWriteCount, pDescriptorWrites);
     safe_VkWriteDescriptorSet *local_pDescriptorWrites = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         layout = layer_data->Unwrap(layout);
         if (pDescriptorWrites) {
             local_pDescriptorWrites = new safe_VkWriteDescriptorSet[descriptorWriteCount];
             for (uint32_t index0 = 0; index0 < descriptorWriteCount; ++index0) {
                 local_pDescriptorWrites[index0].initialize(&pDescriptorWrites[index0]);
-                local_pDescriptorWrites[index0].pNext = CreateUnwrappedExtensionStructs(layer_data, local_pDescriptorWrites[index0].pNext);
+                WrapPnextChainHandles(layer_data, local_pDescriptorWrites[index0].pNext);
                 if (pDescriptorWrites[index0].dstSet) {
                     local_pDescriptorWrites[index0].dstSet = layer_data->Unwrap(pDescriptorWrites[index0].dstSet);
                 }
@@ -6394,9 +4374,6 @@ void DispatchCmdPushDescriptorSetKHR(
     }
     layer_data->device_dispatch_table.CmdPushDescriptorSetKHR(commandBuffer, pipelineBindPoint, layout, set, descriptorWriteCount, (const VkWriteDescriptorSet*)local_pDescriptorWrites);
     if (local_pDescriptorWrites) {
-        for (uint32_t index0 = 0; index0 < descriptorWriteCount; ++index0) {
-            FreeUnwrappedExtensionStructs(const_cast<void *>(local_pDescriptorWrites[index0].pNext));
-        }
         delete[] local_pDescriptorWrites;
     }
 }
@@ -6420,7 +4397,6 @@ void DispatchCmdBeginRenderPass2KHR(
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdBeginRenderPass2KHR(commandBuffer, pRenderPassBegin, pSubpassBeginInfo);
     safe_VkRenderPassBeginInfo *local_pRenderPassBegin = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pRenderPassBegin) {
             local_pRenderPassBegin = new safe_VkRenderPassBeginInfo(pRenderPassBegin);
             if (pRenderPassBegin->renderPass) {
@@ -6429,12 +4405,11 @@ void DispatchCmdBeginRenderPass2KHR(
             if (pRenderPassBegin->framebuffer) {
                 local_pRenderPassBegin->framebuffer = layer_data->Unwrap(pRenderPassBegin->framebuffer);
             }
-            local_pRenderPassBegin->pNext = CreateUnwrappedExtensionStructs(layer_data, local_pRenderPassBegin->pNext);
+            WrapPnextChainHandles(layer_data, local_pRenderPassBegin->pNext);
         }
     }
     layer_data->device_dispatch_table.CmdBeginRenderPass2KHR(commandBuffer, (const VkRenderPassBeginInfo*)local_pRenderPassBegin, pSubpassBeginInfo);
     if (local_pRenderPassBegin) {
-        FreeUnwrappedExtensionStructs(const_cast<void *>(local_pRenderPassBegin->pNext));
         delete local_pRenderPassBegin;
     }
 }
@@ -6465,7 +4440,6 @@ VkResult DispatchGetSwapchainStatusKHR(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.GetSwapchainStatusKHR(device, swapchain);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         swapchain = layer_data->Unwrap(swapchain);
     }
     VkResult result = layer_data->device_dispatch_table.GetSwapchainStatusKHR(device, swapchain);
@@ -6493,7 +4467,6 @@ VkResult DispatchImportFenceWin32HandleKHR(
     if (!wrap_handles) return layer_data->device_dispatch_table.ImportFenceWin32HandleKHR(device, pImportFenceWin32HandleInfo);
     safe_VkImportFenceWin32HandleInfoKHR *local_pImportFenceWin32HandleInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pImportFenceWin32HandleInfo) {
             local_pImportFenceWin32HandleInfo = new safe_VkImportFenceWin32HandleInfoKHR(pImportFenceWin32HandleInfo);
             if (pImportFenceWin32HandleInfo->fence) {
@@ -6520,7 +4493,6 @@ VkResult DispatchGetFenceWin32HandleKHR(
     if (!wrap_handles) return layer_data->device_dispatch_table.GetFenceWin32HandleKHR(device, pGetWin32HandleInfo, pHandle);
     safe_VkFenceGetWin32HandleInfoKHR *local_pGetWin32HandleInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pGetWin32HandleInfo) {
             local_pGetWin32HandleInfo = new safe_VkFenceGetWin32HandleInfoKHR(pGetWin32HandleInfo);
             if (pGetWin32HandleInfo->fence) {
@@ -6544,7 +4516,6 @@ VkResult DispatchImportFenceFdKHR(
     if (!wrap_handles) return layer_data->device_dispatch_table.ImportFenceFdKHR(device, pImportFenceFdInfo);
     safe_VkImportFenceFdInfoKHR *local_pImportFenceFdInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pImportFenceFdInfo) {
             local_pImportFenceFdInfo = new safe_VkImportFenceFdInfoKHR(pImportFenceFdInfo);
             if (pImportFenceFdInfo->fence) {
@@ -6568,7 +4539,6 @@ VkResult DispatchGetFenceFdKHR(
     if (!wrap_handles) return layer_data->device_dispatch_table.GetFenceFdKHR(device, pGetFdInfo, pFd);
     safe_VkFenceGetFdInfoKHR *local_pGetFdInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pGetFdInfo) {
             local_pGetFdInfo = new safe_VkFenceGetFdInfoKHR(pGetFdInfo);
             if (pGetFdInfo->fence) {
@@ -6592,7 +4562,6 @@ VkResult DispatchGetPhysicalDeviceSurfaceCapabilities2KHR(
     if (!wrap_handles) return layer_data->instance_dispatch_table.GetPhysicalDeviceSurfaceCapabilities2KHR(physicalDevice, pSurfaceInfo, pSurfaceCapabilities);
     safe_VkPhysicalDeviceSurfaceInfo2KHR *local_pSurfaceInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pSurfaceInfo) {
             local_pSurfaceInfo = new safe_VkPhysicalDeviceSurfaceInfo2KHR(pSurfaceInfo);
             if (pSurfaceInfo->surface) {
@@ -6617,7 +4586,6 @@ VkResult DispatchGetPhysicalDeviceSurfaceFormats2KHR(
     if (!wrap_handles) return layer_data->instance_dispatch_table.GetPhysicalDeviceSurfaceFormats2KHR(physicalDevice, pSurfaceInfo, pSurfaceFormatCount, pSurfaceFormats);
     safe_VkPhysicalDeviceSurfaceInfo2KHR *local_pSurfaceInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pSurfaceInfo) {
             local_pSurfaceInfo = new safe_VkPhysicalDeviceSurfaceInfo2KHR(pSurfaceInfo);
             if (pSurfaceInfo->surface) {
@@ -6647,7 +4615,6 @@ VkResult DispatchGetDisplayPlaneCapabilities2KHR(
     if (!wrap_handles) return layer_data->instance_dispatch_table.GetDisplayPlaneCapabilities2KHR(physicalDevice, pDisplayPlaneInfo, pCapabilities);
     safe_VkDisplayPlaneInfo2KHR *local_pDisplayPlaneInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pDisplayPlaneInfo) {
             local_pDisplayPlaneInfo = new safe_VkDisplayPlaneInfo2KHR(pDisplayPlaneInfo);
             if (pDisplayPlaneInfo->mode) {
@@ -6671,7 +4638,6 @@ void DispatchGetImageMemoryRequirements2KHR(
     if (!wrap_handles) return layer_data->device_dispatch_table.GetImageMemoryRequirements2KHR(device, pInfo, pMemoryRequirements);
     safe_VkImageMemoryRequirementsInfo2 *local_pInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pInfo) {
             local_pInfo = new safe_VkImageMemoryRequirementsInfo2(pInfo);
             if (pInfo->image) {
@@ -6694,7 +4660,6 @@ void DispatchGetBufferMemoryRequirements2KHR(
     if (!wrap_handles) return layer_data->device_dispatch_table.GetBufferMemoryRequirements2KHR(device, pInfo, pMemoryRequirements);
     safe_VkBufferMemoryRequirementsInfo2 *local_pInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pInfo) {
             local_pInfo = new safe_VkBufferMemoryRequirementsInfo2(pInfo);
             if (pInfo->buffer) {
@@ -6718,7 +4683,6 @@ void DispatchGetImageSparseMemoryRequirements2KHR(
     if (!wrap_handles) return layer_data->device_dispatch_table.GetImageSparseMemoryRequirements2KHR(device, pInfo, pSparseMemoryRequirementCount, pSparseMemoryRequirements);
     safe_VkImageSparseMemoryRequirementsInfo2 *local_pInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pInfo) {
             local_pInfo = new safe_VkImageSparseMemoryRequirementsInfo2(pInfo);
             if (pInfo->image) {
@@ -6742,19 +4706,16 @@ VkResult DispatchCreateSamplerYcbcrConversionKHR(
     if (!wrap_handles) return layer_data->device_dispatch_table.CreateSamplerYcbcrConversionKHR(device, pCreateInfo, pAllocator, pYcbcrConversion);
     safe_VkSamplerYcbcrConversionCreateInfo *local_pCreateInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pCreateInfo) {
             local_pCreateInfo = new safe_VkSamplerYcbcrConversionCreateInfo(pCreateInfo);
-            local_pCreateInfo->pNext = CreateUnwrappedExtensionStructs(layer_data, local_pCreateInfo->pNext);
+            WrapPnextChainHandles(layer_data, local_pCreateInfo->pNext);
         }
     }
     VkResult result = layer_data->device_dispatch_table.CreateSamplerYcbcrConversionKHR(device, (const VkSamplerYcbcrConversionCreateInfo*)local_pCreateInfo, pAllocator, pYcbcrConversion);
     if (local_pCreateInfo) {
-        FreeUnwrappedExtensionStructs(const_cast<void *>(local_pCreateInfo->pNext));
         delete local_pCreateInfo;
     }
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pYcbcrConversion = layer_data->WrapNew(*pYcbcrConversion);
     }
     return result;
@@ -6767,11 +4728,13 @@ void DispatchDestroySamplerYcbcrConversionKHR(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroySamplerYcbcrConversionKHR(device, ycbcrConversion, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t ycbcrConversion_id = reinterpret_cast<uint64_t &>(ycbcrConversion);
-    ycbcrConversion = (VkSamplerYcbcrConversion)unique_id_mapping[ycbcrConversion_id];
-    unique_id_mapping.erase(ycbcrConversion_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(ycbcrConversion_id);
+    if (iter != unique_id_mapping.end()) {
+        ycbcrConversion = (VkSamplerYcbcrConversion)iter->second;
+    } else {
+        ycbcrConversion = (VkSamplerYcbcrConversion)0;
+    }
     layer_data->device_dispatch_table.DestroySamplerYcbcrConversionKHR(device, ycbcrConversion, pAllocator);
 
 }
@@ -6785,7 +4748,6 @@ VkResult DispatchBindBufferMemory2KHR(
     if (!wrap_handles) return layer_data->device_dispatch_table.BindBufferMemory2KHR(device, bindInfoCount, pBindInfos);
     safe_VkBindBufferMemoryInfo *local_pBindInfos = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pBindInfos) {
             local_pBindInfos = new safe_VkBindBufferMemoryInfo[bindInfoCount];
             for (uint32_t index0 = 0; index0 < bindInfoCount; ++index0) {
@@ -6815,12 +4777,11 @@ VkResult DispatchBindImageMemory2KHR(
     if (!wrap_handles) return layer_data->device_dispatch_table.BindImageMemory2KHR(device, bindInfoCount, pBindInfos);
     safe_VkBindImageMemoryInfo *local_pBindInfos = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pBindInfos) {
             local_pBindInfos = new safe_VkBindImageMemoryInfo[bindInfoCount];
             for (uint32_t index0 = 0; index0 < bindInfoCount; ++index0) {
                 local_pBindInfos[index0].initialize(&pBindInfos[index0]);
-                local_pBindInfos[index0].pNext = CreateUnwrappedExtensionStructs(layer_data, local_pBindInfos[index0].pNext);
+                WrapPnextChainHandles(layer_data, local_pBindInfos[index0].pNext);
                 if (pBindInfos[index0].image) {
                     local_pBindInfos[index0].image = layer_data->Unwrap(pBindInfos[index0].image);
                 }
@@ -6832,9 +4793,6 @@ VkResult DispatchBindImageMemory2KHR(
     }
     VkResult result = layer_data->device_dispatch_table.BindImageMemory2KHR(device, bindInfoCount, (const VkBindImageMemoryInfo*)local_pBindInfos);
     if (local_pBindInfos) {
-        for (uint32_t index0 = 0; index0 < bindInfoCount; ++index0) {
-            FreeUnwrappedExtensionStructs(const_cast<void *>(local_pBindInfos[index0].pNext));
-        }
         delete[] local_pBindInfos;
     }
     return result;
@@ -6849,7 +4807,6 @@ void DispatchGetDescriptorSetLayoutSupportKHR(
     if (!wrap_handles) return layer_data->device_dispatch_table.GetDescriptorSetLayoutSupportKHR(device, pCreateInfo, pSupport);
     safe_VkDescriptorSetLayoutCreateInfo *local_pCreateInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pCreateInfo) {
             local_pCreateInfo = new safe_VkDescriptorSetLayoutCreateInfo(pCreateInfo);
             if (local_pCreateInfo->pBindings) {
@@ -6881,7 +4838,6 @@ void DispatchCmdDrawIndirectCountKHR(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdDrawIndirectCountKHR(commandBuffer, buffer, offset, countBuffer, countBufferOffset, maxDrawCount, stride);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         buffer = layer_data->Unwrap(buffer);
         countBuffer = layer_data->Unwrap(countBuffer);
     }
@@ -6901,12 +4857,83 @@ void DispatchCmdDrawIndexedIndirectCountKHR(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdDrawIndexedIndirectCountKHR(commandBuffer, buffer, offset, countBuffer, countBufferOffset, maxDrawCount, stride);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         buffer = layer_data->Unwrap(buffer);
         countBuffer = layer_data->Unwrap(countBuffer);
     }
     layer_data->device_dispatch_table.CmdDrawIndexedIndirectCountKHR(commandBuffer, buffer, offset, countBuffer, countBufferOffset, maxDrawCount, stride);
 
+}
+
+VkResult DispatchGetPipelineExecutablePropertiesKHR(
+    VkDevice                                    device,
+    const VkPipelineInfoKHR*                    pPipelineInfo,
+    uint32_t*                                   pExecutableCount,
+    VkPipelineExecutablePropertiesKHR*          pProperties)
+{
+    auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
+    if (!wrap_handles) return layer_data->device_dispatch_table.GetPipelineExecutablePropertiesKHR(device, pPipelineInfo, pExecutableCount, pProperties);
+    safe_VkPipelineInfoKHR *local_pPipelineInfo = NULL;
+    {
+        if (pPipelineInfo) {
+            local_pPipelineInfo = new safe_VkPipelineInfoKHR(pPipelineInfo);
+            if (pPipelineInfo->pipeline) {
+                local_pPipelineInfo->pipeline = layer_data->Unwrap(pPipelineInfo->pipeline);
+            }
+        }
+    }
+    VkResult result = layer_data->device_dispatch_table.GetPipelineExecutablePropertiesKHR(device, (const VkPipelineInfoKHR*)local_pPipelineInfo, pExecutableCount, pProperties);
+    if (local_pPipelineInfo) {
+        delete local_pPipelineInfo;
+    }
+    return result;
+}
+
+VkResult DispatchGetPipelineExecutableStatisticsKHR(
+    VkDevice                                    device,
+    const VkPipelineExecutableInfoKHR*          pExecutableInfo,
+    uint32_t*                                   pStatisticCount,
+    VkPipelineExecutableStatisticKHR*           pStatistics)
+{
+    auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
+    if (!wrap_handles) return layer_data->device_dispatch_table.GetPipelineExecutableStatisticsKHR(device, pExecutableInfo, pStatisticCount, pStatistics);
+    safe_VkPipelineExecutableInfoKHR *local_pExecutableInfo = NULL;
+    {
+        if (pExecutableInfo) {
+            local_pExecutableInfo = new safe_VkPipelineExecutableInfoKHR(pExecutableInfo);
+            if (pExecutableInfo->pipeline) {
+                local_pExecutableInfo->pipeline = layer_data->Unwrap(pExecutableInfo->pipeline);
+            }
+        }
+    }
+    VkResult result = layer_data->device_dispatch_table.GetPipelineExecutableStatisticsKHR(device, (const VkPipelineExecutableInfoKHR*)local_pExecutableInfo, pStatisticCount, pStatistics);
+    if (local_pExecutableInfo) {
+        delete local_pExecutableInfo;
+    }
+    return result;
+}
+
+VkResult DispatchGetPipelineExecutableInternalRepresentationsKHR(
+    VkDevice                                    device,
+    const VkPipelineExecutableInfoKHR*          pExecutableInfo,
+    uint32_t*                                   pInternalRepresentationCount,
+    VkPipelineExecutableInternalRepresentationKHR* pInternalRepresentations)
+{
+    auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
+    if (!wrap_handles) return layer_data->device_dispatch_table.GetPipelineExecutableInternalRepresentationsKHR(device, pExecutableInfo, pInternalRepresentationCount, pInternalRepresentations);
+    safe_VkPipelineExecutableInfoKHR *local_pExecutableInfo = NULL;
+    {
+        if (pExecutableInfo) {
+            local_pExecutableInfo = new safe_VkPipelineExecutableInfoKHR(pExecutableInfo);
+            if (pExecutableInfo->pipeline) {
+                local_pExecutableInfo->pipeline = layer_data->Unwrap(pExecutableInfo->pipeline);
+            }
+        }
+    }
+    VkResult result = layer_data->device_dispatch_table.GetPipelineExecutableInternalRepresentationsKHR(device, (const VkPipelineExecutableInfoKHR*)local_pExecutableInfo, pInternalRepresentationCount, pInternalRepresentations);
+    if (local_pExecutableInfo) {
+        delete local_pExecutableInfo;
+    }
+    return result;
 }
 
 VkResult DispatchCreateDebugReportCallbackEXT(
@@ -6919,7 +4946,6 @@ VkResult DispatchCreateDebugReportCallbackEXT(
     if (!wrap_handles) return layer_data->instance_dispatch_table.CreateDebugReportCallbackEXT(instance, pCreateInfo, pAllocator, pCallback);
     VkResult result = layer_data->instance_dispatch_table.CreateDebugReportCallbackEXT(instance, pCreateInfo, pAllocator, pCallback);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pCallback = layer_data->WrapNew(*pCallback);
     }
     return result;
@@ -6932,11 +4958,13 @@ void DispatchDestroyDebugReportCallbackEXT(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(instance), layer_data_map);
     if (!wrap_handles) return layer_data->instance_dispatch_table.DestroyDebugReportCallbackEXT(instance, callback, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t callback_id = reinterpret_cast<uint64_t &>(callback);
-    callback = (VkDebugReportCallbackEXT)unique_id_mapping[callback_id];
-    unique_id_mapping.erase(callback_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(callback_id);
+    if (iter != unique_id_mapping.end()) {
+        callback = (VkDebugReportCallbackEXT)iter->second;
+    } else {
+        callback = (VkDebugReportCallbackEXT)0;
+    }
     layer_data->instance_dispatch_table.DestroyDebugReportCallbackEXT(instance, callback, pAllocator);
 
 }
@@ -6998,7 +5026,6 @@ void DispatchCmdBindTransformFeedbackBuffersEXT(
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdBindTransformFeedbackBuffersEXT(commandBuffer, firstBinding, bindingCount, pBuffers, pOffsets, pSizes);
     VkBuffer *local_pBuffers = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pBuffers) {
             local_pBuffers = new VkBuffer[bindingCount];
             for (uint32_t index0 = 0; index0 < bindingCount; ++index0) {
@@ -7022,7 +5049,6 @@ void DispatchCmdBeginTransformFeedbackEXT(
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdBeginTransformFeedbackEXT(commandBuffer, firstCounterBuffer, counterBufferCount, pCounterBuffers, pCounterBufferOffsets);
     VkBuffer *local_pCounterBuffers = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pCounterBuffers) {
             local_pCounterBuffers = new VkBuffer[counterBufferCount];
             for (uint32_t index0 = 0; index0 < counterBufferCount; ++index0) {
@@ -7046,7 +5072,6 @@ void DispatchCmdEndTransformFeedbackEXT(
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdEndTransformFeedbackEXT(commandBuffer, firstCounterBuffer, counterBufferCount, pCounterBuffers, pCounterBufferOffsets);
     VkBuffer *local_pCounterBuffers = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pCounterBuffers) {
             local_pCounterBuffers = new VkBuffer[counterBufferCount];
             for (uint32_t index0 = 0; index0 < counterBufferCount; ++index0) {
@@ -7069,7 +5094,6 @@ void DispatchCmdBeginQueryIndexedEXT(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdBeginQueryIndexedEXT(commandBuffer, queryPool, query, flags, index);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         queryPool = layer_data->Unwrap(queryPool);
     }
     layer_data->device_dispatch_table.CmdBeginQueryIndexedEXT(commandBuffer, queryPool, query, flags, index);
@@ -7085,7 +5109,6 @@ void DispatchCmdEndQueryIndexedEXT(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdEndQueryIndexedEXT(commandBuffer, queryPool, query, index);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         queryPool = layer_data->Unwrap(queryPool);
     }
     layer_data->device_dispatch_table.CmdEndQueryIndexedEXT(commandBuffer, queryPool, query, index);
@@ -7104,7 +5127,6 @@ void DispatchCmdDrawIndirectByteCountEXT(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdDrawIndirectByteCountEXT(commandBuffer, instanceCount, firstInstance, counterBuffer, counterBufferOffset, counterOffset, vertexStride);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         counterBuffer = layer_data->Unwrap(counterBuffer);
     }
     layer_data->device_dispatch_table.CmdDrawIndirectByteCountEXT(commandBuffer, instanceCount, firstInstance, counterBuffer, counterBufferOffset, counterOffset, vertexStride);
@@ -7119,7 +5141,6 @@ uint32_t DispatchGetImageViewHandleNVX(
     if (!wrap_handles) return layer_data->device_dispatch_table.GetImageViewHandleNVX(device, pInfo);
     safe_VkImageViewHandleInfoNVX *local_pInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pInfo) {
             local_pInfo = new safe_VkImageViewHandleInfoNVX(pInfo);
             if (pInfo->imageView) {
@@ -7149,7 +5170,6 @@ void DispatchCmdDrawIndirectCountAMD(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdDrawIndirectCountAMD(commandBuffer, buffer, offset, countBuffer, countBufferOffset, maxDrawCount, stride);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         buffer = layer_data->Unwrap(buffer);
         countBuffer = layer_data->Unwrap(countBuffer);
     }
@@ -7169,7 +5189,6 @@ void DispatchCmdDrawIndexedIndirectCountAMD(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdDrawIndexedIndirectCountAMD(commandBuffer, buffer, offset, countBuffer, countBufferOffset, maxDrawCount, stride);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         buffer = layer_data->Unwrap(buffer);
         countBuffer = layer_data->Unwrap(countBuffer);
     }
@@ -7188,7 +5207,6 @@ VkResult DispatchGetShaderInfoAMD(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.GetShaderInfoAMD(device, pipeline, shaderStage, infoType, pInfoSize, pInfo);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         pipeline = layer_data->Unwrap(pipeline);
     }
     VkResult result = layer_data->device_dispatch_table.GetShaderInfoAMD(device, pipeline, shaderStage, infoType, pInfoSize, pInfo);
@@ -7208,7 +5226,6 @@ VkResult DispatchCreateStreamDescriptorSurfaceGGP(
     if (!wrap_handles) return layer_data->instance_dispatch_table.CreateStreamDescriptorSurfaceGGP(instance, pCreateInfo, pAllocator, pSurface);
     VkResult result = layer_data->instance_dispatch_table.CreateStreamDescriptorSurfaceGGP(instance, pCreateInfo, pAllocator, pSurface);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pSurface = layer_data->WrapNew(*pSurface);
     }
     return result;
@@ -7242,7 +5259,6 @@ VkResult DispatchGetMemoryWin32HandleNV(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.GetMemoryWin32HandleNV(device, memory, handleType, pHandle);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         memory = layer_data->Unwrap(memory);
     }
     VkResult result = layer_data->device_dispatch_table.GetMemoryWin32HandleNV(device, memory, handleType, pHandle);
@@ -7263,7 +5279,6 @@ VkResult DispatchCreateViSurfaceNN(
     if (!wrap_handles) return layer_data->instance_dispatch_table.CreateViSurfaceNN(instance, pCreateInfo, pAllocator, pSurface);
     VkResult result = layer_data->instance_dispatch_table.CreateViSurfaceNN(instance, pCreateInfo, pAllocator, pSurface);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pSurface = layer_data->WrapNew(*pSurface);
     }
     return result;
@@ -7278,7 +5293,6 @@ void DispatchCmdBeginConditionalRenderingEXT(
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdBeginConditionalRenderingEXT(commandBuffer, pConditionalRenderingBegin);
     safe_VkConditionalRenderingBeginInfoEXT *local_pConditionalRenderingBegin = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pConditionalRenderingBegin) {
             local_pConditionalRenderingBegin = new safe_VkConditionalRenderingBeginInfoEXT(pConditionalRenderingBegin);
             if (pConditionalRenderingBegin->buffer) {
@@ -7308,7 +5322,6 @@ void DispatchCmdProcessCommandsNVX(
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdProcessCommandsNVX(commandBuffer, pProcessCommandsInfo);
     safe_VkCmdProcessCommandsInfoNVX *local_pProcessCommandsInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pProcessCommandsInfo) {
             local_pProcessCommandsInfo = new safe_VkCmdProcessCommandsInfoNVX(pProcessCommandsInfo);
             if (pProcessCommandsInfo->objectTable) {
@@ -7346,7 +5359,6 @@ void DispatchCmdReserveSpaceForCommandsNVX(
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdReserveSpaceForCommandsNVX(commandBuffer, pReserveSpaceInfo);
     safe_VkCmdReserveSpaceForCommandsInfoNVX *local_pReserveSpaceInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pReserveSpaceInfo) {
             local_pReserveSpaceInfo = new safe_VkCmdReserveSpaceForCommandsInfoNVX(pReserveSpaceInfo);
             if (pReserveSpaceInfo->objectTable) {
@@ -7373,7 +5385,6 @@ VkResult DispatchCreateIndirectCommandsLayoutNVX(
     if (!wrap_handles) return layer_data->device_dispatch_table.CreateIndirectCommandsLayoutNVX(device, pCreateInfo, pAllocator, pIndirectCommandsLayout);
     VkResult result = layer_data->device_dispatch_table.CreateIndirectCommandsLayoutNVX(device, pCreateInfo, pAllocator, pIndirectCommandsLayout);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pIndirectCommandsLayout = layer_data->WrapNew(*pIndirectCommandsLayout);
     }
     return result;
@@ -7386,11 +5397,13 @@ void DispatchDestroyIndirectCommandsLayoutNVX(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroyIndirectCommandsLayoutNVX(device, indirectCommandsLayout, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t indirectCommandsLayout_id = reinterpret_cast<uint64_t &>(indirectCommandsLayout);
-    indirectCommandsLayout = (VkIndirectCommandsLayoutNVX)unique_id_mapping[indirectCommandsLayout_id];
-    unique_id_mapping.erase(indirectCommandsLayout_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(indirectCommandsLayout_id);
+    if (iter != unique_id_mapping.end()) {
+        indirectCommandsLayout = (VkIndirectCommandsLayoutNVX)iter->second;
+    } else {
+        indirectCommandsLayout = (VkIndirectCommandsLayoutNVX)0;
+    }
     layer_data->device_dispatch_table.DestroyIndirectCommandsLayoutNVX(device, indirectCommandsLayout, pAllocator);
 
 }
@@ -7405,7 +5418,6 @@ VkResult DispatchCreateObjectTableNVX(
     if (!wrap_handles) return layer_data->device_dispatch_table.CreateObjectTableNVX(device, pCreateInfo, pAllocator, pObjectTable);
     VkResult result = layer_data->device_dispatch_table.CreateObjectTableNVX(device, pCreateInfo, pAllocator, pObjectTable);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pObjectTable = layer_data->WrapNew(*pObjectTable);
     }
     return result;
@@ -7418,11 +5430,13 @@ void DispatchDestroyObjectTableNVX(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroyObjectTableNVX(device, objectTable, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t objectTable_id = reinterpret_cast<uint64_t &>(objectTable);
-    objectTable = (VkObjectTableNVX)unique_id_mapping[objectTable_id];
-    unique_id_mapping.erase(objectTable_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(objectTable_id);
+    if (iter != unique_id_mapping.end()) {
+        objectTable = (VkObjectTableNVX)iter->second;
+    } else {
+        objectTable = (VkObjectTableNVX)0;
+    }
     layer_data->device_dispatch_table.DestroyObjectTableNVX(device, objectTable, pAllocator);
 
 }
@@ -7437,7 +5451,6 @@ VkResult DispatchRegisterObjectsNVX(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.RegisterObjectsNVX(device, objectTable, objectCount, ppObjectTableEntries, pObjectIndices);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         objectTable = layer_data->Unwrap(objectTable);
     }
     VkResult result = layer_data->device_dispatch_table.RegisterObjectsNVX(device, objectTable, objectCount, ppObjectTableEntries, pObjectIndices);
@@ -7455,7 +5468,6 @@ VkResult DispatchUnregisterObjectsNVX(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.UnregisterObjectsNVX(device, objectTable, objectCount, pObjectEntryTypes, pObjectIndices);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         objectTable = layer_data->Unwrap(objectTable);
     }
     VkResult result = layer_data->device_dispatch_table.UnregisterObjectsNVX(device, objectTable, objectCount, pObjectEntryTypes, pObjectIndices);
@@ -7491,7 +5503,6 @@ VkResult DispatchReleaseDisplayEXT(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(physicalDevice), layer_data_map);
     if (!wrap_handles) return layer_data->instance_dispatch_table.ReleaseDisplayEXT(physicalDevice, display);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         display = layer_data->Unwrap(display);
     }
     VkResult result = layer_data->instance_dispatch_table.ReleaseDisplayEXT(physicalDevice, display);
@@ -7509,7 +5520,6 @@ VkResult DispatchAcquireXlibDisplayEXT(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(physicalDevice), layer_data_map);
     if (!wrap_handles) return layer_data->instance_dispatch_table.AcquireXlibDisplayEXT(physicalDevice, dpy, display);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         display = layer_data->Unwrap(display);
     }
     VkResult result = layer_data->instance_dispatch_table.AcquireXlibDisplayEXT(physicalDevice, dpy, display);
@@ -7530,7 +5540,6 @@ VkResult DispatchGetRandROutputDisplayEXT(
     if (!wrap_handles) return layer_data->instance_dispatch_table.GetRandROutputDisplayEXT(physicalDevice, dpy, rrOutput, pDisplay);
     VkResult result = layer_data->instance_dispatch_table.GetRandROutputDisplayEXT(physicalDevice, dpy, rrOutput, pDisplay);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pDisplay = layer_data->WrapNew(*pDisplay);
     }
     return result;
@@ -7545,7 +5554,6 @@ VkResult DispatchGetPhysicalDeviceSurfaceCapabilities2EXT(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(physicalDevice), layer_data_map);
     if (!wrap_handles) return layer_data->instance_dispatch_table.GetPhysicalDeviceSurfaceCapabilities2EXT(physicalDevice, surface, pSurfaceCapabilities);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         surface = layer_data->Unwrap(surface);
     }
     VkResult result = layer_data->instance_dispatch_table.GetPhysicalDeviceSurfaceCapabilities2EXT(physicalDevice, surface, pSurfaceCapabilities);
@@ -7561,7 +5569,6 @@ VkResult DispatchDisplayPowerControlEXT(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DisplayPowerControlEXT(device, display, pDisplayPowerInfo);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         display = layer_data->Unwrap(display);
     }
     VkResult result = layer_data->device_dispatch_table.DisplayPowerControlEXT(device, display, pDisplayPowerInfo);
@@ -7579,7 +5586,6 @@ VkResult DispatchRegisterDeviceEventEXT(
     if (!wrap_handles) return layer_data->device_dispatch_table.RegisterDeviceEventEXT(device, pDeviceEventInfo, pAllocator, pFence);
     VkResult result = layer_data->device_dispatch_table.RegisterDeviceEventEXT(device, pDeviceEventInfo, pAllocator, pFence);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pFence = layer_data->WrapNew(*pFence);
     }
     return result;
@@ -7595,12 +5601,10 @@ VkResult DispatchRegisterDisplayEventEXT(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.RegisterDisplayEventEXT(device, display, pDisplayEventInfo, pAllocator, pFence);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         display = layer_data->Unwrap(display);
     }
     VkResult result = layer_data->device_dispatch_table.RegisterDisplayEventEXT(device, display, pDisplayEventInfo, pAllocator, pFence);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pFence = layer_data->WrapNew(*pFence);
     }
     return result;
@@ -7615,7 +5619,6 @@ VkResult DispatchGetSwapchainCounterEXT(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.GetSwapchainCounterEXT(device, swapchain, counter, pCounterValue);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         swapchain = layer_data->Unwrap(swapchain);
     }
     VkResult result = layer_data->device_dispatch_table.GetSwapchainCounterEXT(device, swapchain, counter, pCounterValue);
@@ -7631,7 +5634,6 @@ VkResult DispatchGetRefreshCycleDurationGOOGLE(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.GetRefreshCycleDurationGOOGLE(device, swapchain, pDisplayTimingProperties);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         swapchain = layer_data->Unwrap(swapchain);
     }
     VkResult result = layer_data->device_dispatch_table.GetRefreshCycleDurationGOOGLE(device, swapchain, pDisplayTimingProperties);
@@ -7648,7 +5650,6 @@ VkResult DispatchGetPastPresentationTimingGOOGLE(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.GetPastPresentationTimingGOOGLE(device, swapchain, pPresentationTimingCount, pPresentationTimings);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         swapchain = layer_data->Unwrap(swapchain);
     }
     VkResult result = layer_data->device_dispatch_table.GetPastPresentationTimingGOOGLE(device, swapchain, pPresentationTimingCount, pPresentationTimings);
@@ -7677,7 +5678,6 @@ void DispatchSetHdrMetadataEXT(
     if (!wrap_handles) return layer_data->device_dispatch_table.SetHdrMetadataEXT(device, swapchainCount, pSwapchains, pMetadata);
     VkSwapchainKHR *local_pSwapchains = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pSwapchains) {
             local_pSwapchains = new VkSwapchainKHR[swapchainCount];
             for (uint32_t index0 = 0; index0 < swapchainCount; ++index0) {
@@ -7702,7 +5702,6 @@ VkResult DispatchCreateIOSSurfaceMVK(
     if (!wrap_handles) return layer_data->instance_dispatch_table.CreateIOSSurfaceMVK(instance, pCreateInfo, pAllocator, pSurface);
     VkResult result = layer_data->instance_dispatch_table.CreateIOSSurfaceMVK(instance, pCreateInfo, pAllocator, pSurface);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pSurface = layer_data->WrapNew(*pSurface);
     }
     return result;
@@ -7721,7 +5720,6 @@ VkResult DispatchCreateMacOSSurfaceMVK(
     if (!wrap_handles) return layer_data->instance_dispatch_table.CreateMacOSSurfaceMVK(instance, pCreateInfo, pAllocator, pSurface);
     VkResult result = layer_data->instance_dispatch_table.CreateMacOSSurfaceMVK(instance, pCreateInfo, pAllocator, pSurface);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pSurface = layer_data->WrapNew(*pSurface);
     }
     return result;
@@ -7794,7 +5792,6 @@ VkResult DispatchCreateDebugUtilsMessengerEXT(
     if (!wrap_handles) return layer_data->instance_dispatch_table.CreateDebugUtilsMessengerEXT(instance, pCreateInfo, pAllocator, pMessenger);
     VkResult result = layer_data->instance_dispatch_table.CreateDebugUtilsMessengerEXT(instance, pCreateInfo, pAllocator, pMessenger);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pMessenger = layer_data->WrapNew(*pMessenger);
     }
     return result;
@@ -7807,11 +5804,13 @@ void DispatchDestroyDebugUtilsMessengerEXT(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(instance), layer_data_map);
     if (!wrap_handles) return layer_data->instance_dispatch_table.DestroyDebugUtilsMessengerEXT(instance, messenger, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t messenger_id = reinterpret_cast<uint64_t &>(messenger);
-    messenger = (VkDebugUtilsMessengerEXT)unique_id_mapping[messenger_id];
-    unique_id_mapping.erase(messenger_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(messenger_id);
+    if (iter != unique_id_mapping.end()) {
+        messenger = (VkDebugUtilsMessengerEXT)iter->second;
+    } else {
+        messenger = (VkDebugUtilsMessengerEXT)0;
+    }
     layer_data->instance_dispatch_table.DestroyDebugUtilsMessengerEXT(instance, messenger, pAllocator);
 
 }
@@ -7852,7 +5851,6 @@ VkResult DispatchGetMemoryAndroidHardwareBufferANDROID(
     if (!wrap_handles) return layer_data->device_dispatch_table.GetMemoryAndroidHardwareBufferANDROID(device, pInfo, pBuffer);
     safe_VkMemoryGetAndroidHardwareBufferInfoANDROID *local_pInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pInfo) {
             local_pInfo = new safe_VkMemoryGetAndroidHardwareBufferInfoANDROID(pInfo);
             if (pInfo->memory) {
@@ -7895,7 +5893,6 @@ VkResult DispatchGetImageDrmFormatModifierPropertiesEXT(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.GetImageDrmFormatModifierPropertiesEXT(device, image, pProperties);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         image = layer_data->Unwrap(image);
     }
     VkResult result = layer_data->device_dispatch_table.GetImageDrmFormatModifierPropertiesEXT(device, image, pProperties);
@@ -7913,7 +5910,6 @@ VkResult DispatchCreateValidationCacheEXT(
     if (!wrap_handles) return layer_data->device_dispatch_table.CreateValidationCacheEXT(device, pCreateInfo, pAllocator, pValidationCache);
     VkResult result = layer_data->device_dispatch_table.CreateValidationCacheEXT(device, pCreateInfo, pAllocator, pValidationCache);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pValidationCache = layer_data->WrapNew(*pValidationCache);
     }
     return result;
@@ -7926,11 +5922,13 @@ void DispatchDestroyValidationCacheEXT(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroyValidationCacheEXT(device, validationCache, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t validationCache_id = reinterpret_cast<uint64_t &>(validationCache);
-    validationCache = (VkValidationCacheEXT)unique_id_mapping[validationCache_id];
-    unique_id_mapping.erase(validationCache_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(validationCache_id);
+    if (iter != unique_id_mapping.end()) {
+        validationCache = (VkValidationCacheEXT)iter->second;
+    } else {
+        validationCache = (VkValidationCacheEXT)0;
+    }
     layer_data->device_dispatch_table.DestroyValidationCacheEXT(device, validationCache, pAllocator);
 
 }
@@ -7945,7 +5943,6 @@ VkResult DispatchMergeValidationCachesEXT(
     if (!wrap_handles) return layer_data->device_dispatch_table.MergeValidationCachesEXT(device, dstCache, srcCacheCount, pSrcCaches);
     VkValidationCacheEXT *local_pSrcCaches = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         dstCache = layer_data->Unwrap(dstCache);
         if (pSrcCaches) {
             local_pSrcCaches = new VkValidationCacheEXT[srcCacheCount];
@@ -7969,7 +5966,6 @@ VkResult DispatchGetValidationCacheDataEXT(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.GetValidationCacheDataEXT(device, validationCache, pDataSize, pData);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         validationCache = layer_data->Unwrap(validationCache);
     }
     VkResult result = layer_data->device_dispatch_table.GetValidationCacheDataEXT(device, validationCache, pDataSize, pData);
@@ -7985,7 +5981,6 @@ void DispatchCmdBindShadingRateImageNV(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdBindShadingRateImageNV(commandBuffer, imageView, imageLayout);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         imageView = layer_data->Unwrap(imageView);
     }
     layer_data->device_dispatch_table.CmdBindShadingRateImageNV(commandBuffer, imageView, imageLayout);
@@ -8024,7 +6019,6 @@ VkResult DispatchCreateAccelerationStructureNV(
     if (!wrap_handles) return layer_data->device_dispatch_table.CreateAccelerationStructureNV(device, pCreateInfo, pAllocator, pAccelerationStructure);
     safe_VkAccelerationStructureCreateInfoNV *local_pCreateInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pCreateInfo) {
             local_pCreateInfo = new safe_VkAccelerationStructureCreateInfoNV(pCreateInfo);
             if (local_pCreateInfo->info.pGeometries) {
@@ -8050,7 +6044,6 @@ VkResult DispatchCreateAccelerationStructureNV(
         delete local_pCreateInfo;
     }
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pAccelerationStructure = layer_data->WrapNew(*pAccelerationStructure);
     }
     return result;
@@ -8063,11 +6056,13 @@ void DispatchDestroyAccelerationStructureNV(
 {
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.DestroyAccelerationStructureNV(device, accelerationStructure, pAllocator);
-    std::unique_lock<std::mutex> lock(dispatch_lock);
     uint64_t accelerationStructure_id = reinterpret_cast<uint64_t &>(accelerationStructure);
-    accelerationStructure = (VkAccelerationStructureNV)unique_id_mapping[accelerationStructure_id];
-    unique_id_mapping.erase(accelerationStructure_id);
-    lock.unlock();
+    auto iter = unique_id_mapping.pop(accelerationStructure_id);
+    if (iter != unique_id_mapping.end()) {
+        accelerationStructure = (VkAccelerationStructureNV)iter->second;
+    } else {
+        accelerationStructure = (VkAccelerationStructureNV)0;
+    }
     layer_data->device_dispatch_table.DestroyAccelerationStructureNV(device, accelerationStructure, pAllocator);
 
 }
@@ -8081,7 +6076,6 @@ void DispatchGetAccelerationStructureMemoryRequirementsNV(
     if (!wrap_handles) return layer_data->device_dispatch_table.GetAccelerationStructureMemoryRequirementsNV(device, pInfo, pMemoryRequirements);
     safe_VkAccelerationStructureMemoryRequirementsInfoNV *local_pInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pInfo) {
             local_pInfo = new safe_VkAccelerationStructureMemoryRequirementsInfoNV(pInfo);
             if (pInfo->accelerationStructure) {
@@ -8104,7 +6098,6 @@ VkResult DispatchBindAccelerationStructureMemoryNV(
     if (!wrap_handles) return layer_data->device_dispatch_table.BindAccelerationStructureMemoryNV(device, bindInfoCount, pBindInfos);
     safe_VkBindAccelerationStructureMemoryInfoNV *local_pBindInfos = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pBindInfos) {
             local_pBindInfos = new safe_VkBindAccelerationStructureMemoryInfoNV[bindInfoCount];
             for (uint32_t index0 = 0; index0 < bindInfoCount; ++index0) {
@@ -8140,7 +6133,6 @@ void DispatchCmdBuildAccelerationStructureNV(
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdBuildAccelerationStructureNV(commandBuffer, pInfo, instanceData, instanceOffset, update, dst, src, scratch, scratchOffset);
     safe_VkAccelerationStructureInfoNV *local_pInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pInfo) {
             local_pInfo = new safe_VkAccelerationStructureInfoNV(pInfo);
             if (local_pInfo->pGeometries) {
@@ -8180,7 +6172,6 @@ void DispatchCmdCopyAccelerationStructureNV(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdCopyAccelerationStructureNV(commandBuffer, dst, src, mode);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         dst = layer_data->Unwrap(dst);
         src = layer_data->Unwrap(src);
     }
@@ -8208,7 +6199,6 @@ void DispatchCmdTraceRaysNV(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdTraceRaysNV(commandBuffer, raygenShaderBindingTableBuffer, raygenShaderBindingOffset, missShaderBindingTableBuffer, missShaderBindingOffset, missShaderBindingStride, hitShaderBindingTableBuffer, hitShaderBindingOffset, hitShaderBindingStride, callableShaderBindingTableBuffer, callableShaderBindingOffset, callableShaderBindingStride, width, height, depth);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         raygenShaderBindingTableBuffer = layer_data->Unwrap(raygenShaderBindingTableBuffer);
         missShaderBindingTableBuffer = layer_data->Unwrap(missShaderBindingTableBuffer);
         hitShaderBindingTableBuffer = layer_data->Unwrap(hitShaderBindingTableBuffer);
@@ -8230,7 +6220,6 @@ VkResult DispatchCreateRayTracingPipelinesNV(
     if (!wrap_handles) return layer_data->device_dispatch_table.CreateRayTracingPipelinesNV(device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
     safe_VkRayTracingPipelineCreateInfoNV *local_pCreateInfos = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         pipelineCache = layer_data->Unwrap(pipelineCache);
         if (pCreateInfos) {
             local_pCreateInfos = new safe_VkRayTracingPipelineCreateInfoNV[createInfoCount];
@@ -8257,7 +6246,6 @@ VkResult DispatchCreateRayTracingPipelinesNV(
         delete[] local_pCreateInfos;
     }
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         for (uint32_t index0 = 0; index0 < createInfoCount; index0++) {
             pPipelines[index0] = layer_data->WrapNew(pPipelines[index0]);
         }
@@ -8276,7 +6264,6 @@ VkResult DispatchGetRayTracingShaderGroupHandlesNV(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.GetRayTracingShaderGroupHandlesNV(device, pipeline, firstGroup, groupCount, dataSize, pData);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         pipeline = layer_data->Unwrap(pipeline);
     }
     VkResult result = layer_data->device_dispatch_table.GetRayTracingShaderGroupHandlesNV(device, pipeline, firstGroup, groupCount, dataSize, pData);
@@ -8293,7 +6280,6 @@ VkResult DispatchGetAccelerationStructureHandleNV(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.GetAccelerationStructureHandleNV(device, accelerationStructure, dataSize, pData);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         accelerationStructure = layer_data->Unwrap(accelerationStructure);
     }
     VkResult result = layer_data->device_dispatch_table.GetAccelerationStructureHandleNV(device, accelerationStructure, dataSize, pData);
@@ -8313,7 +6299,6 @@ void DispatchCmdWriteAccelerationStructuresPropertiesNV(
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdWriteAccelerationStructuresPropertiesNV(commandBuffer, accelerationStructureCount, pAccelerationStructures, queryType, queryPool, firstQuery);
     VkAccelerationStructureNV *local_pAccelerationStructures = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pAccelerationStructures) {
             local_pAccelerationStructures = new VkAccelerationStructureNV[accelerationStructureCount];
             for (uint32_t index0 = 0; index0 < accelerationStructureCount; ++index0) {
@@ -8335,7 +6320,6 @@ VkResult DispatchCompileDeferredNV(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CompileDeferredNV(device, pipeline, shader);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         pipeline = layer_data->Unwrap(pipeline);
     }
     VkResult result = layer_data->device_dispatch_table.CompileDeferredNV(device, pipeline, shader);
@@ -8365,7 +6349,6 @@ void DispatchCmdWriteBufferMarkerAMD(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdWriteBufferMarkerAMD(commandBuffer, pipelineStage, dstBuffer, dstOffset, marker);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         dstBuffer = layer_data->Unwrap(dstBuffer);
     }
     layer_data->device_dispatch_table.CmdWriteBufferMarkerAMD(commandBuffer, pipelineStage, dstBuffer, dstOffset, marker);
@@ -8416,7 +6399,6 @@ void DispatchCmdDrawMeshTasksIndirectNV(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdDrawMeshTasksIndirectNV(commandBuffer, buffer, offset, drawCount, stride);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         buffer = layer_data->Unwrap(buffer);
     }
     layer_data->device_dispatch_table.CmdDrawMeshTasksIndirectNV(commandBuffer, buffer, offset, drawCount, stride);
@@ -8435,7 +6417,6 @@ void DispatchCmdDrawMeshTasksIndirectCountNV(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.CmdDrawMeshTasksIndirectCountNV(commandBuffer, buffer, offset, countBuffer, countBufferOffset, maxDrawCount, stride);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         buffer = layer_data->Unwrap(buffer);
         countBuffer = layer_data->Unwrap(countBuffer);
     }
@@ -8529,7 +6510,6 @@ VkResult DispatchAcquirePerformanceConfigurationINTEL(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.AcquirePerformanceConfigurationINTEL(device, pAcquireInfo, pConfiguration);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         pConfiguration = layer_data->Unwrap(pConfiguration);
     }
     VkResult result = layer_data->device_dispatch_table.AcquirePerformanceConfigurationINTEL(device, pAcquireInfo, pConfiguration);
@@ -8544,7 +6524,6 @@ VkResult DispatchReleasePerformanceConfigurationINTEL(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.ReleasePerformanceConfigurationINTEL(device, configuration);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         configuration = layer_data->Unwrap(configuration);
     }
     VkResult result = layer_data->device_dispatch_table.ReleasePerformanceConfigurationINTEL(device, configuration);
@@ -8559,7 +6538,6 @@ VkResult DispatchQueueSetPerformanceConfigurationINTEL(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(queue), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.QueueSetPerformanceConfigurationINTEL(queue, configuration);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         configuration = layer_data->Unwrap(configuration);
     }
     VkResult result = layer_data->device_dispatch_table.QueueSetPerformanceConfigurationINTEL(queue, configuration);
@@ -8586,7 +6564,6 @@ void DispatchSetLocalDimmingAMD(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.SetLocalDimmingAMD(device, swapChain, localDimmingEnable);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         swapChain = layer_data->Unwrap(swapChain);
     }
     layer_data->device_dispatch_table.SetLocalDimmingAMD(device, swapChain, localDimmingEnable);
@@ -8605,7 +6582,6 @@ VkResult DispatchCreateImagePipeSurfaceFUCHSIA(
     if (!wrap_handles) return layer_data->instance_dispatch_table.CreateImagePipeSurfaceFUCHSIA(instance, pCreateInfo, pAllocator, pSurface);
     VkResult result = layer_data->instance_dispatch_table.CreateImagePipeSurfaceFUCHSIA(instance, pCreateInfo, pAllocator, pSurface);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pSurface = layer_data->WrapNew(*pSurface);
     }
     return result;
@@ -8624,7 +6600,6 @@ VkResult DispatchCreateMetalSurfaceEXT(
     if (!wrap_handles) return layer_data->instance_dispatch_table.CreateMetalSurfaceEXT(instance, pCreateInfo, pAllocator, pSurface);
     VkResult result = layer_data->instance_dispatch_table.CreateMetalSurfaceEXT(instance, pCreateInfo, pAllocator, pSurface);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pSurface = layer_data->WrapNew(*pSurface);
     }
     return result;
@@ -8639,7 +6614,6 @@ VkDeviceAddress DispatchGetBufferDeviceAddressEXT(
     if (!wrap_handles) return layer_data->device_dispatch_table.GetBufferDeviceAddressEXT(device, pInfo);
     safe_VkBufferDeviceAddressInfoEXT *local_pInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pInfo) {
             local_pInfo = new safe_VkBufferDeviceAddressInfoEXT(pInfo);
             if (pInfo->buffer) {
@@ -8688,7 +6662,6 @@ VkResult DispatchGetPhysicalDeviceSurfacePresentModes2EXT(
     if (!wrap_handles) return layer_data->instance_dispatch_table.GetPhysicalDeviceSurfacePresentModes2EXT(physicalDevice, pSurfaceInfo, pPresentModeCount, pPresentModes);
     safe_VkPhysicalDeviceSurfaceInfo2KHR *local_pSurfaceInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pSurfaceInfo) {
             local_pSurfaceInfo = new safe_VkPhysicalDeviceSurfaceInfo2KHR(pSurfaceInfo);
             if (pSurfaceInfo->surface) {
@@ -8713,7 +6686,6 @@ VkResult DispatchAcquireFullScreenExclusiveModeEXT(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.AcquireFullScreenExclusiveModeEXT(device, swapchain);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         swapchain = layer_data->Unwrap(swapchain);
     }
     VkResult result = layer_data->device_dispatch_table.AcquireFullScreenExclusiveModeEXT(device, swapchain);
@@ -8731,7 +6703,6 @@ VkResult DispatchReleaseFullScreenExclusiveModeEXT(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.ReleaseFullScreenExclusiveModeEXT(device, swapchain);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         swapchain = layer_data->Unwrap(swapchain);
     }
     VkResult result = layer_data->device_dispatch_table.ReleaseFullScreenExclusiveModeEXT(device, swapchain);
@@ -8751,7 +6722,6 @@ VkResult DispatchGetDeviceGroupSurfacePresentModes2EXT(
     if (!wrap_handles) return layer_data->device_dispatch_table.GetDeviceGroupSurfacePresentModes2EXT(device, pSurfaceInfo, pModes);
     safe_VkPhysicalDeviceSurfaceInfo2KHR *local_pSurfaceInfo = NULL;
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         if (pSurfaceInfo) {
             local_pSurfaceInfo = new safe_VkPhysicalDeviceSurfaceInfo2KHR(pSurfaceInfo);
             if (pSurfaceInfo->surface) {
@@ -8777,10 +6747,19 @@ VkResult DispatchCreateHeadlessSurfaceEXT(
     if (!wrap_handles) return layer_data->instance_dispatch_table.CreateHeadlessSurfaceEXT(instance, pCreateInfo, pAllocator, pSurface);
     VkResult result = layer_data->instance_dispatch_table.CreateHeadlessSurfaceEXT(instance, pCreateInfo, pAllocator, pSurface);
     if (VK_SUCCESS == result) {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         *pSurface = layer_data->WrapNew(*pSurface);
     }
     return result;
+}
+
+void DispatchCmdSetLineStippleEXT(
+    VkCommandBuffer                             commandBuffer,
+    uint32_t                                    lineStippleFactor,
+    uint16_t                                    lineStipplePattern)
+{
+    auto layer_data = GetLayerDataPtr(get_dispatch_key(commandBuffer), layer_data_map);
+    layer_data->device_dispatch_table.CmdSetLineStippleEXT(commandBuffer, lineStippleFactor, lineStipplePattern);
+
 }
 
 void DispatchResetQueryPoolEXT(
@@ -8792,7 +6771,6 @@ void DispatchResetQueryPoolEXT(
     auto layer_data = GetLayerDataPtr(get_dispatch_key(device), layer_data_map);
     if (!wrap_handles) return layer_data->device_dispatch_table.ResetQueryPoolEXT(device, queryPool, firstQuery, queryCount);
     {
-        std::lock_guard<std::mutex> lock(dispatch_lock);
         queryPool = layer_data->Unwrap(queryPool);
     }
     layer_data->device_dispatch_table.ResetQueryPoolEXT(device, queryPool, firstQuery, queryCount);

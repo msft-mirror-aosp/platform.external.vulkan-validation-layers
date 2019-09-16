@@ -28,7 +28,7 @@
 #include "layer_validation_tests.h"
 
 TEST_F(VkLayerTest, PSOPolygonModeInvalid) {
-    TEST_DESCRIPTION("Attempt to use a non-solid polygon fill mode in a pipeline when this feature is not enabled.");
+    TEST_DESCRIPTION("Attempt to use invalid polygon fill modes.");
     VkPhysicalDeviceFeatures device_features = {};
     device_features.fillModeNonSolid = VK_FALSE;
     // The sacrificial device object
@@ -43,17 +43,23 @@ TEST_F(VkLayerTest, PSOPolygonModeInvalid) {
 
     auto set_polygonMode = [&](CreatePipelineHelper &helper) { helper.rs_state_ci_ = rs_ci; };
 
-    // Set polygonMode to unsupported value POINT, should fail
+    // Set polygonMode to POINT while the non-solid fill mode feature is disabled.
     // Introduce failure by setting unsupported polygon mode
     rs_ci.polygonMode = VK_POLYGON_MODE_POINT;
     CreatePipelineHelper::OneshotTest(*this, set_polygonMode, VK_DEBUG_REPORT_ERROR_BIT_EXT,
                                       "polygonMode cannot be VK_POLYGON_MODE_POINT or VK_POLYGON_MODE_LINE");
 
-    // Try again with polygonMode=LINE, should fail
+    // Set polygonMode to LINE while the non-solid fill mode feature is disabled.
     // Introduce failure by setting unsupported polygon mode
     rs_ci.polygonMode = VK_POLYGON_MODE_LINE;
     CreatePipelineHelper::OneshotTest(*this, set_polygonMode, VK_DEBUG_REPORT_ERROR_BIT_EXT,
                                       "polygonMode cannot be VK_POLYGON_MODE_POINT or VK_POLYGON_MODE_LINE");
+
+    // Set polygonMode to FILL_RECTANGLE_NV while the extension is not enabled.
+    // Introduce failure by setting unsupported polygon mode
+    rs_ci.polygonMode = VK_POLYGON_MODE_FILL_RECTANGLE_NV;
+    CreatePipelineHelper::OneshotTest(*this, set_polygonMode, VK_DEBUG_REPORT_ERROR_BIT_EXT,
+                                      "VUID-VkPipelineRasterizationStateCreateInfo-polygonMode-01414");
 }
 
 TEST_F(VkLayerTest, PipelineNotBound) {
@@ -2829,7 +2835,7 @@ TEST_F(VkLayerTest, CreatePipelineCheckShaderBadSpecialization) {
 
     const auto set_info = [&](CreatePipelineHelper &helper) {
         helper.shader_stages_ = {helper.vs_->GetStageCreateInfo(), fs.GetStageCreateInfo()};
-        helper.shader_stages_[0].pSpecializationInfo = &specialization_info;
+        helper.shader_stages_[1].pSpecializationInfo = &specialization_info;
     };
     CreatePipelineHelper::OneshotTest(
         *this, set_info, VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT,
@@ -4100,7 +4106,7 @@ TEST_F(VkLayerTest, CreatePipelineExceedMaxGeometryInputOutputComponents) {
 
         // Finalize
         int max_vertices = overflow ? (m_device->props.limits.maxGeometryTotalOutputComponents / maxGeomOutComp + 1) : 1;
-        gsSourceStr += "layout(points, max_vertices = " + std::to_string(max_vertices) +
+        gsSourceStr += "layout(triangle_strip, max_vertices = " + std::to_string(max_vertices) +
                        ") out;\n"
                        "\n"
                        "void main(){\n"
@@ -4196,7 +4202,7 @@ TEST_F(VkLayerTest, CreatePipelineExceedMaxGeometryInstanceVertexCount) {
                OpMemoryModel Logical GLSL450
                OpEntryPoint Geometry %main "main"
                OpExecutionMode %main InputPoints
-               OpExecutionMode %main OutputPoints
+               OpExecutionMode %main OutputTriangleStrip
                )";
         if (overflow) {
             gsSourceStr += "OpExecutionMode %main Invocations " +
@@ -5538,4 +5544,211 @@ TEST_F(VkLayerTest, CreatePipelineCheckFragmentShaderInterlockEnabled) {
         "enabled on the device");
     pipe.CreateVKPipeline(pipeline_layout.handle(), render_pass.handle());
     m_errorMonitor->VerifyFound();
+}
+
+TEST_F(VkLayerTest, CreatePipelineCheckDemoteToHelperInvocation) {
+    TEST_DESCRIPTION("Create a pipeline requiring the demote to helper invocation feature which has not enabled on the device.");
+
+    ASSERT_NO_FATAL_FAILURE(Init());
+
+    std::vector<const char *> device_extension_names;
+    if (DeviceExtensionSupported(gpu(), nullptr, VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME)) {
+        // Note: we intentionally do not add the required extension to the device extension list.
+        //       in order to create the error below
+    } else {
+        // We skip this test if the extension is not supported by the driver as in some cases this will cause
+        // the vkCreateShaderModule to fail without generating an error message
+        printf("%s Extension %s is not supported.\n", kSkipPrefix, VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME);
+        return;
+    }
+
+    auto features = m_device->phy().features();
+
+    // Disable the demote to helper invocation feature.
+    auto demote_features = lvl_init_struct<VkPhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT>();
+    demote_features.shaderDemoteToHelperInvocation = VK_FALSE;
+
+    VkDeviceObj test_device(0, gpu(), device_extension_names, &features, &demote_features);
+
+    char const *fsSource =
+        "#version 450\n"
+        "#extension GL_EXT_demote_to_helper_invocation : require\n"
+        "void main(){\n"
+        "    demote;\n"
+        "}\n";
+
+    VkShaderObj vs(&test_device, bindStateVertShaderText, VK_SHADER_STAGE_VERTEX_BIT, this);
+    VkShaderObj fs(&test_device, fsSource, VK_SHADER_STAGE_FRAGMENT_BIT, this);
+
+    VkRenderpassObj render_pass(&test_device);
+
+    VkPipelineObj pipe(&test_device);
+    pipe.AddDefaultColorAttachment();
+    pipe.AddShader(&vs);
+    pipe.AddShader(&fs);
+
+    const VkPipelineLayoutObj pipeline_layout(&test_device);
+
+    m_errorMonitor->SetDesiredFailureMsg(
+        VK_DEBUG_REPORT_ERROR_BIT_EXT,
+        "Shader requires VkPhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT::shaderDemoteToHelperInvocation but is not "
+        "enabled on "
+        "the device");
+    m_errorMonitor->SetDesiredFailureMsg(
+        VK_DEBUG_REPORT_ERROR_BIT_EXT,
+        "Shader requires extension VkPhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT::shaderDemoteToHelperInvocation but "
+        "is not "
+        "enabled on the device");
+    pipe.CreateVKPipeline(pipeline_layout.handle(), render_pass.handle());
+    m_errorMonitor->VerifyFound();
+}
+
+TEST_F(VkLayerTest, CreatePipelineCheckLineRasterization) {
+    TEST_DESCRIPTION("Test VK_EXT_line_rasterization state against feature enables.");
+
+    if (InstanceExtensionSupported(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME)) {
+        m_instance_extension_names.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+    } else {
+        printf("%s Did not find required instance extension %s; skipped.\n", kSkipPrefix,
+               VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+        return;
+    }
+    ASSERT_NO_FATAL_FAILURE(InitFramework(myDbgFunc, m_errorMonitor));
+    std::array<const char *, 1> required_device_extensions = {{VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME}};
+    for (auto device_extension : required_device_extensions) {
+        if (DeviceExtensionSupported(gpu(), nullptr, device_extension)) {
+            m_device_extension_names.push_back(device_extension);
+        } else {
+            printf("%s %s Extension not supported, skipping tests\n", kSkipPrefix, device_extension);
+            return;
+        }
+    }
+
+    PFN_vkGetPhysicalDeviceFeatures2KHR vkGetPhysicalDeviceFeatures2KHR =
+        (PFN_vkGetPhysicalDeviceFeatures2KHR)vkGetInstanceProcAddr(instance(), "vkGetPhysicalDeviceFeatures2KHR");
+    ASSERT_TRUE(vkGetPhysicalDeviceFeatures2KHR != nullptr);
+
+    auto line_rasterization_features = lvl_init_struct<VkPhysicalDeviceLineRasterizationFeaturesEXT>();
+    auto features2 = lvl_init_struct<VkPhysicalDeviceFeatures2KHR>(&line_rasterization_features);
+    vkGetPhysicalDeviceFeatures2KHR(gpu(), &features2);
+
+    line_rasterization_features.rectangularLines = VK_FALSE;
+    line_rasterization_features.bresenhamLines = VK_FALSE;
+    line_rasterization_features.smoothLines = VK_FALSE;
+    line_rasterization_features.stippledRectangularLines = VK_FALSE;
+    line_rasterization_features.stippledBresenhamLines = VK_FALSE;
+    line_rasterization_features.stippledSmoothLines = VK_FALSE;
+
+    ASSERT_NO_FATAL_FAILURE(InitState(nullptr, &features2, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT));
+    ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
+
+    CreatePipelineHelper::OneshotTest(
+        *this,
+        [&](CreatePipelineHelper &helper) {
+            helper.line_state_ci_.lineRasterizationMode = VK_LINE_RASTERIZATION_MODE_BRESENHAM_EXT;
+            helper.pipe_ms_state_ci_.alphaToCoverageEnable = VK_TRUE;
+        },
+        VK_DEBUG_REPORT_ERROR_BIT_EXT,
+        std::vector<const char *>{"VUID-VkGraphicsPipelineCreateInfo-lineRasterizationMode-02766",
+                                  "VUID-VkPipelineRasterizationLineStateCreateInfoEXT-lineRasterizationMode-02769"});
+
+    CreatePipelineHelper::OneshotTest(
+        *this,
+        [&](CreatePipelineHelper &helper) {
+            helper.line_state_ci_.lineRasterizationMode = VK_LINE_RASTERIZATION_MODE_BRESENHAM_EXT;
+            helper.line_state_ci_.stippledLineEnable = VK_TRUE;
+        },
+        VK_DEBUG_REPORT_ERROR_BIT_EXT,
+        std::vector<const char *>{"VUID-VkGraphicsPipelineCreateInfo-stippledLineEnable-02767",
+                                  "VUID-VkPipelineRasterizationLineStateCreateInfoEXT-lineRasterizationMode-02769",
+                                  "VUID-VkPipelineRasterizationLineStateCreateInfoEXT-stippledLineEnable-02772"});
+
+    CreatePipelineHelper::OneshotTest(
+        *this,
+        [&](CreatePipelineHelper &helper) {
+            helper.line_state_ci_.lineRasterizationMode = VK_LINE_RASTERIZATION_MODE_RECTANGULAR_EXT;
+            helper.line_state_ci_.stippledLineEnable = VK_TRUE;
+        },
+        VK_DEBUG_REPORT_ERROR_BIT_EXT,
+        std::vector<const char *>{"VUID-VkGraphicsPipelineCreateInfo-stippledLineEnable-02767",
+                                  "VUID-VkPipelineRasterizationLineStateCreateInfoEXT-lineRasterizationMode-02768",
+                                  "VUID-VkPipelineRasterizationLineStateCreateInfoEXT-stippledLineEnable-02771"});
+
+    CreatePipelineHelper::OneshotTest(
+        *this,
+        [&](CreatePipelineHelper &helper) {
+            helper.line_state_ci_.lineRasterizationMode = VK_LINE_RASTERIZATION_MODE_RECTANGULAR_SMOOTH_EXT;
+            helper.line_state_ci_.stippledLineEnable = VK_TRUE;
+        },
+        VK_DEBUG_REPORT_ERROR_BIT_EXT,
+        std::vector<const char *>{"VUID-VkGraphicsPipelineCreateInfo-stippledLineEnable-02767",
+                                  "VUID-VkPipelineRasterizationLineStateCreateInfoEXT-lineRasterizationMode-02770",
+                                  "VUID-VkPipelineRasterizationLineStateCreateInfoEXT-stippledLineEnable-02773"});
+
+    CreatePipelineHelper::OneshotTest(
+        *this,
+        [&](CreatePipelineHelper &helper) {
+            helper.line_state_ci_.lineRasterizationMode = VK_LINE_RASTERIZATION_MODE_DEFAULT_EXT;
+            helper.line_state_ci_.stippledLineEnable = VK_TRUE;
+        },
+        VK_DEBUG_REPORT_ERROR_BIT_EXT,
+        std::vector<const char *>{"VUID-VkGraphicsPipelineCreateInfo-stippledLineEnable-02767",
+                                  "VUID-VkPipelineRasterizationLineStateCreateInfoEXT-stippledLineEnable-02774"});
+
+    PFN_vkCmdSetLineStippleEXT vkCmdSetLineStippleEXT =
+        (PFN_vkCmdSetLineStippleEXT)vkGetDeviceProcAddr(m_device->device(), "vkCmdSetLineStippleEXT");
+    ASSERT_TRUE(vkCmdSetLineStippleEXT != nullptr);
+
+    m_commandBuffer->begin();
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkCmdSetLineStippleEXT-lineStippleFactor-02776");
+    vkCmdSetLineStippleEXT(m_commandBuffer->handle(), 0, 0);
+    m_errorMonitor->VerifyFound();
+    vkCmdSetLineStippleEXT(m_commandBuffer->handle(), 1, 1);
+    m_errorMonitor->VerifyFound();
+}
+
+TEST_F(VkLayerTest, FillRectangleNV) {
+    TEST_DESCRIPTION("Verify VK_NV_fill_rectangle");
+
+    ASSERT_NO_FATAL_FAILURE(InitFramework(myDbgFunc, m_errorMonitor));
+
+    VkPhysicalDeviceFeatures device_features = {};
+    ASSERT_NO_FATAL_FAILURE(GetPhysicalDeviceFeatures(&device_features));
+
+    // Disable non-solid fill modes to make sure that the usage of VK_POLYGON_MODE_LINE and
+    // VK_POLYGON_MODE_POINT will cause an error when the VK_NV_fill_rectangle extension is enabled.
+    device_features.fillModeNonSolid = VK_FALSE;
+
+    if (DeviceExtensionSupported(gpu(), nullptr, VK_NV_FILL_RECTANGLE_EXTENSION_NAME)) {
+        m_device_extension_names.push_back(VK_NV_FILL_RECTANGLE_EXTENSION_NAME);
+    } else {
+        printf("%s %s Extension not supported, skipping tests\n", kSkipPrefix, VK_NV_FILL_RECTANGLE_EXTENSION_NAME);
+        return;
+    }
+
+    ASSERT_NO_FATAL_FAILURE(InitState(&device_features));
+    ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
+
+    VkPolygonMode polygon_mode = VK_POLYGON_MODE_LINE;
+
+    auto set_polygon_mode = [&polygon_mode](CreatePipelineHelper &helper) { helper.rs_state_ci_.polygonMode = polygon_mode; };
+
+    // Set unsupported polygon mode VK_POLYGON_MODE_LINE
+    CreatePipelineHelper::OneshotTest(*this, set_polygon_mode, VK_DEBUG_REPORT_ERROR_BIT_EXT,
+                                      "VUID-VkPipelineRasterizationStateCreateInfo-polygonMode-01507", false);
+
+    // Set unsupported polygon mode VK_POLYGON_MODE_POINT
+    polygon_mode = VK_POLYGON_MODE_POINT;
+    CreatePipelineHelper::OneshotTest(*this, set_polygon_mode, VK_DEBUG_REPORT_ERROR_BIT_EXT,
+                                      "VUID-VkPipelineRasterizationStateCreateInfo-polygonMode-01507", false);
+
+    // Set supported polygon mode VK_POLYGON_MODE_FILL
+    polygon_mode = VK_POLYGON_MODE_FILL;
+    CreatePipelineHelper::OneshotTest(*this, set_polygon_mode, VK_DEBUG_REPORT_ERROR_BIT_EXT,
+                                      "VUID-VkPipelineRasterizationStateCreateInfo-polygonMode-01507", true);
+
+    // Set supported polygon mode VK_POLYGON_MODE_FILL_RECTANGLE_NV
+    polygon_mode = VK_POLYGON_MODE_FILL_RECTANGLE_NV;
+    CreatePipelineHelper::OneshotTest(*this, set_polygon_mode, VK_DEBUG_REPORT_ERROR_BIT_EXT,
+                                      "VUID-VkPipelineRasterizationStateCreateInfo-polygonMode-01507", true);
 }
