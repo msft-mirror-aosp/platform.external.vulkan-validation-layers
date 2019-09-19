@@ -179,6 +179,49 @@ TEST_F(VkLayerTest, DynamicLineWidthNotBound) {
     m_errorMonitor->VerifyFound();
 }
 
+TEST_F(VkLayerTest, DynamicLineStippleNotBound) {
+    TEST_DESCRIPTION(
+        "Run a simple draw calls to validate failure when Line Stipple dynamic state is required but not correctly bound.");
+
+    if (InstanceExtensionSupported(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME)) {
+        m_instance_extension_names.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+    } else {
+        printf("%s Did not find required instance extension %s; skipped.\n", kSkipPrefix,
+               VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+        return;
+    }
+    ASSERT_NO_FATAL_FAILURE(InitFramework(myDbgFunc, m_errorMonitor));
+    std::array<const char *, 1> required_device_extensions = {{VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME}};
+    for (auto device_extension : required_device_extensions) {
+        if (DeviceExtensionSupported(gpu(), nullptr, device_extension)) {
+            m_device_extension_names.push_back(device_extension);
+        } else {
+            printf("%s %s Extension not supported, skipping tests\n", kSkipPrefix, device_extension);
+            return;
+        }
+    }
+
+    PFN_vkGetPhysicalDeviceFeatures2KHR vkGetPhysicalDeviceFeatures2KHR =
+        (PFN_vkGetPhysicalDeviceFeatures2KHR)vkGetInstanceProcAddr(instance(), "vkGetPhysicalDeviceFeatures2KHR");
+    ASSERT_TRUE(vkGetPhysicalDeviceFeatures2KHR != nullptr);
+
+    auto line_rasterization_features = lvl_init_struct<VkPhysicalDeviceLineRasterizationFeaturesEXT>();
+    auto features2 = lvl_init_struct<VkPhysicalDeviceFeatures2KHR>(&line_rasterization_features);
+    vkGetPhysicalDeviceFeatures2KHR(gpu(), &features2);
+
+    if (!line_rasterization_features.stippledBresenhamLines || !line_rasterization_features.bresenhamLines) {
+        printf("%sStipple Bresenham lines not supported; skipped.\n", kSkipPrefix);
+        return;
+    }
+
+    ASSERT_NO_FATAL_FAILURE(InitState(nullptr, &features2, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT));
+
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
+                                         "Dynamic line stipple state not set for this command buffer");
+    VKTriangleTest(BsoFailLineStipple);
+    m_errorMonitor->VerifyFound();
+}
+
 TEST_F(VkLayerTest, DynamicViewportNotBound) {
     TEST_DESCRIPTION(
         "Run a simple draw calls to validate failure when Viewport dynamic state is required but not correctly bound.");
@@ -885,7 +928,7 @@ TEST_F(VkLayerTest, NonSimultaneousSecondaryMarksPrimary) {
 TEST_F(VkLayerTest, SimultaneousUseSecondaryTwoExecutes) {
     ASSERT_NO_FATAL_FAILURE(Init());
 
-    const char *simultaneous_use_message = "without VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT set!";
+    const char *simultaneous_use_message = "VUID-vkCmdExecuteCommands-pCommandBuffers-00092";
 
     VkCommandBufferObj secondary(m_device, m_commandPool, VK_COMMAND_BUFFER_LEVEL_SECONDARY);
 
@@ -912,7 +955,7 @@ TEST_F(VkLayerTest, SimultaneousUseSecondarySingleExecute) {
     // variation on previous test executing the same CB twice in the same
     // CmdExecuteCommands call
 
-    const char *simultaneous_use_message = "without VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT set!";
+    const char *simultaneous_use_message = "VUID-vkCmdExecuteCommands-pCommandBuffers-00093";
 
     VkCommandBufferObj secondary(m_device, m_commandPool, VK_COMMAND_BUFFER_LEVEL_SECONDARY);
 
@@ -3845,11 +3888,6 @@ TEST_F(VkLayerTest, SetDynViewportParamTests) {
     m_errorMonitor->VerifyFound();
 
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkCmdSetViewport-firstViewport-01224");
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkCmdSetViewport-viewportCount-arraylength");
-    vkCmdSetViewport(m_commandBuffer->handle(), 1, 0, viewports);
-    m_errorMonitor->VerifyFound();
-
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkCmdSetViewport-firstViewport-01224");
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkCmdSetViewport-viewportCount-01225");
     vkCmdSetViewport(m_commandBuffer->handle(), 1, 2, viewports);
     m_errorMonitor->VerifyFound();
@@ -3975,8 +4013,7 @@ TEST_F(VkLayerTest, SetDynViewportParamMultiviewportTests) {
     m_errorMonitor->VerifyFound();
 
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkCmdSetViewport-viewportCount-arraylength");
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkCmdSetViewport-firstViewport-01223");
-    vkCmdSetViewport(m_commandBuffer->handle(), max_viewports + 1, 0, viewports.data());
+    vkCmdSetViewport(m_commandBuffer->handle(), 1, 0, viewports.data());
     m_errorMonitor->VerifyFound();
 }
 
@@ -4233,11 +4270,6 @@ TEST_F(VkLayerTest, SetDynScissorParamTests) {
     m_errorMonitor->VerifyFound();
 
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkCmdSetScissor-firstScissor-00593");
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkCmdSetScissor-scissorCount-arraylength");
-    vkCmdSetScissor(m_commandBuffer->handle(), 1, 0, scissors);
-    m_errorMonitor->VerifyFound();
-
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkCmdSetScissor-firstScissor-00593");
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkCmdSetScissor-scissorCount-00594");
     vkCmdSetScissor(m_commandBuffer->handle(), 1, 2, scissors);
     m_errorMonitor->VerifyFound();
@@ -4317,8 +4349,7 @@ TEST_F(VkLayerTest, SetDynScissorParamMultiviewportTests) {
     m_errorMonitor->VerifyFound();
 
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkCmdSetScissor-scissorCount-arraylength");
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkCmdSetScissor-firstScissor-00592");
-    vkCmdSetScissor(m_commandBuffer->handle(), max_scissors + 1, 0, scissors.data());
+    vkCmdSetScissor(m_commandBuffer->handle(), 1, 0, scissors.data());
     m_errorMonitor->VerifyFound();
 }
 
