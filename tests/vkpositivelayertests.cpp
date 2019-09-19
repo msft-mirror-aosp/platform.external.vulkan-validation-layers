@@ -5543,6 +5543,167 @@ TEST_F(VkPositiveLayerTest, CreateDescriptorSetBindingWithIgnoredSamplers) {
         m_errorMonitor->VerifyNotFound();
     }
 }
+TEST_F(VkPositiveLayerTest, GpuValidationInlineUniformBlock) {
+    TEST_DESCRIPTION("GPU validation: Make sure inline uniform blocks don't generate false validation errors");
+    m_errorMonitor->ExpectSuccess();
+    VkValidationFeatureEnableEXT enables[] = {VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT};
+    VkValidationFeaturesEXT features = {};
+    features.sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT;
+    features.enabledValidationFeatureCount = 1;
+    features.pEnabledValidationFeatures = enables;
+    bool descriptor_indexing = CheckDescriptorIndexingSupportAndInitFramework(this, m_instance_extension_names,
+                                                                              m_device_extension_names, &features, m_errorMonitor);
+    if (DeviceIsMockICD() || DeviceSimulation()) {
+        printf("%s Test not supported by MockICD, skipping tests\n", kSkipPrefix);
+        return;
+    }
+    VkPhysicalDeviceFeatures2KHR features2 = {};
+    auto indexing_features = lvl_init_struct<VkPhysicalDeviceDescriptorIndexingFeaturesEXT>();
+    auto inline_uniform_block_features = lvl_init_struct<VkPhysicalDeviceInlineUniformBlockFeaturesEXT>(&indexing_features);
+    bool inline_uniform_block = DeviceExtensionSupported(gpu(), nullptr, VK_EXT_INLINE_UNIFORM_BLOCK_EXTENSION_NAME);
+    if (!(descriptor_indexing && inline_uniform_block)) {
+        printf("Descriptor indexing and/or inline uniform block not supported Skipping test\n");
+        return;
+    }
+    m_device_extension_names.push_back(VK_KHR_MAINTENANCE1_EXTENSION_NAME);
+    m_device_extension_names.push_back(VK_EXT_INLINE_UNIFORM_BLOCK_EXTENSION_NAME);
+    PFN_vkGetPhysicalDeviceFeatures2KHR vkGetPhysicalDeviceFeatures2KHR =
+        (PFN_vkGetPhysicalDeviceFeatures2KHR)vkGetInstanceProcAddr(instance(), "vkGetPhysicalDeviceFeatures2KHR");
+    ASSERT_TRUE(vkGetPhysicalDeviceFeatures2KHR != nullptr);
+
+    features2 = lvl_init_struct<VkPhysicalDeviceFeatures2KHR>(&inline_uniform_block_features);
+    vkGetPhysicalDeviceFeatures2KHR(gpu(), &features2);
+    if (!indexing_features.descriptorBindingPartiallyBound || !inline_uniform_block_features.inlineUniformBlock) {
+        printf("Not all features supported, skipping test\n");
+        return;
+    }
+    auto inline_uniform_props = lvl_init_struct<VkPhysicalDeviceInlineUniformBlockPropertiesEXT>();
+    auto prop2 = lvl_init_struct<VkPhysicalDeviceProperties2KHR>(&inline_uniform_props);
+    vkGetPhysicalDeviceProperties2(gpu(), &prop2);
+
+    VkCommandPoolCreateFlags pool_flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    ASSERT_NO_FATAL_FAILURE(InitState(nullptr, &features2, pool_flags));
+    if (m_device->props.apiVersion < VK_API_VERSION_1_1) {
+        printf("%s GPU-Assisted validation test requires Vulkan 1.1+.\n", kSkipPrefix);
+        return;
+    }
+    auto c_queue = m_device->GetDefaultComputeQueue();
+    if (nullptr == c_queue) {
+        printf("Compute not supported, skipping test\n");
+        return;
+    }
+
+    uint32_t qfi = 0;
+    VkBufferCreateInfo bci = {};
+    bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bci.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    bci.size = 4;
+    bci.queueFamilyIndexCount = 1;
+    bci.pQueueFamilyIndices = &qfi;
+    VkBufferObj buffer0;
+    VkMemoryPropertyFlags mem_props = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    buffer0.init(*m_device, bci, mem_props);
+
+    VkDescriptorBindingFlagsEXT ds_binding_flags[2] = {};
+    ds_binding_flags[1] = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT_EXT;
+    VkDescriptorSetLayoutBindingFlagsCreateInfoEXT layout_createinfo_binding_flags[1] = {};
+    layout_createinfo_binding_flags[0].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
+    layout_createinfo_binding_flags[0].pNext = NULL;
+    layout_createinfo_binding_flags[0].bindingCount = 2;
+    layout_createinfo_binding_flags[0].pBindingFlags = ds_binding_flags;
+
+    OneOffDescriptorSet descriptor_set(m_device,
+                                       {
+                                           {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
+                                           {1, VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT, 20, VK_SHADER_STAGE_ALL,
+                                            nullptr},  // 16 bytes for ivec4, 4 more for int
+                                       },
+                                       0, layout_createinfo_binding_flags, 0);
+    const VkPipelineLayoutObj pipeline_layout(m_device, {&descriptor_set.layout_});
+
+    VkDescriptorBufferInfo buffer_info[1] = {};
+    buffer_info[0].buffer = buffer0.handle();
+    buffer_info[0].offset = 0;
+    buffer_info[0].range = sizeof(uint32_t);
+
+    const uint32_t test_data = 0xdeadca7;
+    VkWriteDescriptorSetInlineUniformBlockEXT write_inline_uniform = {};
+    write_inline_uniform.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_INLINE_UNIFORM_BLOCK_EXT;
+    write_inline_uniform.dataSize = 4;
+    write_inline_uniform.pData = &test_data;
+
+    VkWriteDescriptorSet descriptor_writes[2] = {};
+    descriptor_writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptor_writes[0].dstSet = descriptor_set.set_;
+    descriptor_writes[0].dstBinding = 0;
+    descriptor_writes[0].descriptorCount = 1;
+    descriptor_writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    descriptor_writes[0].pBufferInfo = buffer_info;
+
+    descriptor_writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptor_writes[1].dstSet = descriptor_set.set_;
+    descriptor_writes[1].dstBinding = 1;
+    descriptor_writes[1].dstArrayElement = 16;  // Skip first 16 bytes (dummy)
+    descriptor_writes[1].descriptorCount = 4;   // Write 4 bytes to val
+    descriptor_writes[1].descriptorType = VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT;
+    descriptor_writes[1].pNext = &write_inline_uniform;
+    vkUpdateDescriptorSets(m_device->device(), 2, descriptor_writes, 0, NULL);
+
+    char const *csSource =
+        "#version 450\n"
+        "#extension GL_EXT_nonuniform_qualifier : enable\n "
+        "layout(set = 0, binding = 0) buffer StorageBuffer { uint index; } u_index;"
+        "layout(set = 0, binding = 1) uniform inlineubodef { ivec4 dummy; int val; } inlineubo;\n"
+
+        "void main() {\n"
+        "    u_index.index = inlineubo.val;\n"
+        "}\n";
+
+    auto shader_module = new VkShaderObj(m_device, csSource, VK_SHADER_STAGE_COMPUTE_BIT, this);
+
+    VkPipelineShaderStageCreateInfo stage;
+    stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stage.pNext = nullptr;
+    stage.flags = 0;
+    stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    stage.module = shader_module->handle();
+    stage.pName = "main";
+    stage.pSpecializationInfo = nullptr;
+
+    // CreateComputePipelines
+    VkComputePipelineCreateInfo pipeline_info = {};
+    pipeline_info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    pipeline_info.pNext = nullptr;
+    pipeline_info.flags = 0;
+    pipeline_info.layout = pipeline_layout.handle();
+    pipeline_info.basePipelineHandle = VK_NULL_HANDLE;
+    pipeline_info.basePipelineIndex = -1;
+    pipeline_info.stage = stage;
+
+    VkPipeline c_pipeline;
+    vkCreateComputePipelines(device(), VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &c_pipeline);
+
+    m_commandBuffer->begin();
+    vkCmdBindPipeline(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_COMPUTE, c_pipeline);
+    vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout.handle(), 0, 1,
+                            &descriptor_set.set_, 0, nullptr);
+    vkCmdDispatch(m_commandBuffer->handle(), 1, 1, 1);
+    m_commandBuffer->end();
+
+    VkSubmitInfo submit_info = {};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &m_commandBuffer->handle();
+    vkQueueSubmit(c_queue->handle(), 1, &submit_info, VK_NULL_HANDLE);
+    vkQueueWaitIdle(m_device->m_queue);
+    m_errorMonitor->VerifyNotFound();
+    vkDestroyPipeline(m_device->handle(), c_pipeline, NULL);
+    vkDestroyShaderModule(m_device->handle(), shader_module->handle(), NULL);
+
+    uint32_t *data = (uint32_t *)buffer0.memory().map();
+    ASSERT_TRUE(*data = test_data);
+    buffer0.memory().unmap();
+}
 
 TEST_F(VkPositiveLayerTest, Maintenance1Tests) {
     TEST_DESCRIPTION("Validate various special cases for the Maintenance1_KHR extension");
@@ -7720,4 +7881,470 @@ TEST_F(VkPositiveLayerTest, TransferImageToSwapchainDeviceGroup) {
 
     vkDestroyImage(m_device->device(), peer_image, NULL);
     DestroySwapchain();
+}
+
+TEST_F(VkPositiveLayerTest, RenderPassValidStages) {
+    TEST_DESCRIPTION("Create render pass with valid stages");
+
+    bool rp2_supported = InstanceExtensionSupported(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+    if (rp2_supported) m_instance_extension_names.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+
+    ASSERT_NO_FATAL_FAILURE(InitFramework(myDbgFunc, m_errorMonitor));
+    if (rp2_supported) rp2_supported = CheckCreateRenderPass2Support(this, m_device_extension_names);
+    ASSERT_NO_FATAL_FAILURE(InitState());
+
+    VkSubpassDescription sci[2] = {};
+    sci[0].pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    sci[1].pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+
+    VkSubpassDependency dependency = {};
+    // to be filled later by tests
+
+    VkRenderPassCreateInfo rpci = {};
+    rpci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    rpci.subpassCount = 2;
+    rpci.pSubpasses = sci;
+    rpci.dependencyCount = 1;
+    rpci.pDependencies = &dependency;
+
+    const VkPipelineStageFlags kGraphicsStages =
+        VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT | VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT |
+        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+        VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT |
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+
+    dependency.srcSubpass = 0;
+    dependency.dstSubpass = 1;
+    dependency.srcStageMask = kGraphicsStages;
+    dependency.dstStageMask = kGraphicsStages;
+    PositiveTestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported);
+
+    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependency.dstSubpass = 0;
+    dependency.srcStageMask = kGraphicsStages | VK_PIPELINE_STAGE_HOST_BIT;
+    dependency.dstStageMask = kGraphicsStages;
+    PositiveTestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported);
+
+    dependency.srcSubpass = 0;
+    dependency.dstSubpass = VK_SUBPASS_EXTERNAL;
+    dependency.srcStageMask = kGraphicsStages;
+    dependency.dstStageMask = VK_PIPELINE_STAGE_HOST_BIT;
+    PositiveTestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported);
+}
+
+TEST_F(VkPositiveLayerTest, SampleMaskOverrideCoverageNV) {
+    TEST_DESCRIPTION("Test to validate VK_NV_sample_mask_override_coverage");
+
+    ASSERT_NO_FATAL_FAILURE(InitFramework(myDbgFunc, m_errorMonitor));
+
+    if (DeviceExtensionSupported(gpu(), nullptr, VK_NV_SAMPLE_MASK_OVERRIDE_COVERAGE_EXTENSION_NAME)) {
+        m_device_extension_names.push_back(VK_NV_SAMPLE_MASK_OVERRIDE_COVERAGE_EXTENSION_NAME);
+    } else {
+        printf("%s %s Extension not supported, skipping tests\n", kSkipPrefix, VK_NV_SAMPLE_MASK_OVERRIDE_COVERAGE_EXTENSION_NAME);
+        return;
+    }
+
+    ASSERT_NO_FATAL_FAILURE(InitState());
+
+    const char vs_src[] = R"(
+        #version 450
+        layout(location=0) out vec4  fragColor;
+
+        const vec2 pos[3] = { vec2( 0.0f, -0.5f),
+                              vec2( 0.5f,  0.5f),
+                              vec2(-0.5f,  0.5f)
+                            };
+        void main()
+        {
+            gl_Position = vec4(pos[gl_VertexIndex % 3], 0.0f, 1.0f);
+            fragColor = vec4(0.0f, 1.0f, 0.0f, 1.0f);
+        })";
+
+    const char fs_src[] = R"(
+        #version 450
+        #extension GL_NV_sample_mask_override_coverage : require
+
+        layout(location = 0) in  vec4 fragColor;
+        layout(location = 0) out vec4 outColor;
+
+        layout(override_coverage) out int gl_SampleMask[];
+
+        void main()
+        {
+            gl_SampleMask[0] = 0xff;
+            outColor = fragColor;
+        })";
+
+    m_errorMonitor->ExpectSuccess();
+
+    const VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_8_BIT;
+
+    VkAttachmentDescription cAttachment = {};
+    cAttachment.format = VK_FORMAT_B8G8R8A8_UNORM;
+    cAttachment.samples = sampleCount;
+    cAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    cAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    cAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    cAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    cAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    cAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference cAttachRef = {};
+    cAttachRef.attachment = 0;
+    cAttachRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass = {};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &cAttachRef;
+
+    VkRenderPassCreateInfo rpci = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+    rpci.attachmentCount = 1;
+    rpci.pAttachments = &cAttachment;
+    rpci.subpassCount = 1;
+    rpci.pSubpasses = &subpass;
+
+    VkRenderPass rp;
+    vkCreateRenderPass(m_device->device(), &rpci, nullptr, &rp);
+
+    const VkPipelineLayoutObj pl(m_device);
+
+    VkSampleMask sampleMask = 0x01;
+    VkPipelineMultisampleStateCreateInfo msaa = {VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
+    msaa.rasterizationSamples = sampleCount;
+    msaa.sampleShadingEnable = VK_FALSE;
+    msaa.pSampleMask = &sampleMask;
+
+    VkPipelineObj pipe(m_device);
+    pipe.AddDefaultColorAttachment();
+    pipe.SetMSAA(&msaa);
+
+    VkShaderObj vs(m_device, vs_src, VK_SHADER_STAGE_VERTEX_BIT, this);
+    pipe.AddShader(&vs);
+
+    VkShaderObj fs(m_device, fs_src, VK_SHADER_STAGE_FRAGMENT_BIT, this);
+    pipe.AddShader(&fs);
+
+    // Create pipeline and make sure that the usage of NV_sample_mask_override_coverage
+    // in the fragment shader does not cause any errors.
+    pipe.CreateVKPipeline(pl.handle(), rp);
+
+    vkDestroyRenderPass(m_device->device(), rp, nullptr);
+
+    m_errorMonitor->VerifyNotFound();
+}
+
+TEST_F(VkPositiveLayerTest, TestRasterizationDiscardEnableTrue) {
+    TEST_DESCRIPTION("Ensure it doesn't crash and trigger error msg when rasterizerDiscardEnable = true");
+    ASSERT_NO_FATAL_FAILURE(Init());
+    ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
+
+    VkAttachmentDescription att[1] = {{}};
+    att[0].format = VK_FORMAT_R8G8B8A8_UNORM;
+    att[0].samples = VK_SAMPLE_COUNT_4_BIT;
+    att[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    att[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    VkAttachmentReference cr = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    VkSubpassDescription sp = {};
+    sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    sp.colorAttachmentCount = 1;
+    sp.pColorAttachments = &cr;
+    VkRenderPassCreateInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+    rpi.attachmentCount = 1;
+    rpi.pAttachments = att;
+    rpi.subpassCount = 1;
+    rpi.pSubpasses = &sp;
+    VkRenderPass rp;
+    vkCreateRenderPass(m_device->device(), &rpi, nullptr, &rp);
+
+    CreatePipelineHelper pipe(*this);
+    pipe.InitInfo();
+    pipe.gp_ci_.pViewportState = nullptr;
+    pipe.gp_ci_.pMultisampleState = nullptr;
+    pipe.gp_ci_.pDepthStencilState = nullptr;
+    pipe.gp_ci_.pColorBlendState = nullptr;
+    pipe.gp_ci_.renderPass = rp;
+
+    m_errorMonitor->ExpectSuccess();
+    // Skip the test in NexusPlayer. The driver crashes when pViewportState, pMultisampleState, pDepthStencilState, pColorBlendState
+    // are NULL.
+    pipe.rs_state_ci_.rasterizerDiscardEnable = VK_TRUE;
+    pipe.InitState();
+    pipe.CreateGraphicsPipeline();
+    m_errorMonitor->VerifyNotFound();
+    vkDestroyRenderPass(m_device->device(), rp, nullptr);
+}
+
+TEST_F(VkPositiveLayerTest, TestSamplerDataForCombinedImageSampler) {
+    TEST_DESCRIPTION("Shader code uses sampler data for CombinedImageSampler");
+    ASSERT_NO_FATAL_FAILURE(Init());
+    ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
+
+    const std::string fsSource = R"(
+                   OpCapability Shader
+                   OpMemoryModel Logical GLSL450
+                   OpEntryPoint Fragment %main "main"
+                   OpExecutionMode %main OriginUpperLeft
+
+                   OpDecorate %InputData DescriptorSet 0
+                   OpDecorate %InputData Binding 0
+                   OpDecorate %SamplerData DescriptorSet 0
+                   OpDecorate %SamplerData Binding 0
+
+               %void = OpTypeVoid
+                %f32 = OpTypeFloat 32
+              %Image = OpTypeImage %f32 2D 0 0 0 1 Rgba32f
+           %ImagePtr = OpTypePointer UniformConstant %Image
+          %InputData = OpVariable %ImagePtr UniformConstant
+            %Sampler = OpTypeSampler
+         %SamplerPtr = OpTypePointer UniformConstant %Sampler
+        %SamplerData = OpVariable %SamplerPtr UniformConstant
+       %SampledImage = OpTypeSampledImage %Image
+
+               %func = OpTypeFunction %void
+               %main = OpFunction %void None %func
+                 %40 = OpLabel
+           %call_smp = OpLoad %Sampler %SamplerData
+                   OpReturn
+                   OpFunctionEnd)";
+
+    VkShaderObj fs(m_device, fsSource, VK_SHADER_STAGE_FRAGMENT_BIT, this);
+
+    CreatePipelineHelper pipe(*this);
+    pipe.InitInfo();
+    pipe.dsl_bindings_ = {
+        {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_ALL, nullptr},
+    };
+    pipe.shader_stages_ = {fs.GetStageCreateInfo(), pipe.vs_->GetStageCreateInfo()};
+    pipe.InitState();
+    pipe.CreateGraphicsPipeline();
+
+    VkImageObj image(m_device);
+    image.Init(32, 32, 1, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_TILING_OPTIMAL, 0);
+    VkImageView view = image.targetView(VK_FORMAT_R8G8B8A8_UNORM);
+
+    VkSamplerCreateInfo sampler_ci = SafeSaneSamplerCreateInfo();
+    VkSampler sampler;
+    vkCreateSampler(m_device->device(), &sampler_ci, nullptr, &sampler);
+
+    uint32_t qfi = 0;
+    VkBufferCreateInfo buffer_create_info = {};
+    buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_create_info.size = 1024;
+    buffer_create_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    buffer_create_info.queueFamilyIndexCount = 1;
+    buffer_create_info.pQueueFamilyIndices = &qfi;
+
+    VkBufferObj buffer;
+    buffer.init(*m_device, buffer_create_info);
+
+    pipe.descriptor_set_->WriteDescriptorImageInfo(0, view, sampler, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    pipe.descriptor_set_->UpdateDescriptorSets();
+
+    m_commandBuffer->begin();
+    m_commandBuffer->BeginRenderPass(m_renderPassBeginInfo);
+    vkCmdBindPipeline(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe.pipeline_);
+    vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe.pipeline_layout_.handle(), 0, 1,
+                            &pipe.descriptor_set_->set_, 0, NULL);
+
+    m_errorMonitor->ExpectSuccess();
+    vkCmdDraw(m_commandBuffer->handle(), 3, 1, 0, 0);
+    m_errorMonitor->VerifyNotFound();
+
+    vkCmdEndRenderPass(m_commandBuffer->handle());
+    m_commandBuffer->end();
+    vkDestroySampler(m_device->device(), sampler, NULL);
+}
+
+TEST_F(VkPositiveLayerTest, NotPointSizeGeometryShaderSuccess) {
+    TEST_DESCRIPTION("Create a pipeline using TOPOLOGY_POINT_LIST, but geometry shader doesn't include PointSize.");
+
+    ASSERT_NO_FATAL_FAILURE(Init());
+
+    if ((!m_device->phy().features().geometryShader)) {
+        printf("%s Device does not support the required geometry shader features; skipped.\n", kSkipPrefix);
+        return;
+    }
+    ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
+    ASSERT_NO_FATAL_FAILURE(InitViewport());
+
+    VkShaderObj gs(m_device, bindStateGeomShaderText, VK_SHADER_STAGE_GEOMETRY_BIT, this);
+
+    CreatePipelineHelper pipe(*this);
+    pipe.InitInfo();
+    pipe.shader_stages_ = {pipe.vs_->GetStageCreateInfo(), gs.GetStageCreateInfo(), pipe.fs_->GetStageCreateInfo()};
+    pipe.ia_ci_.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+    pipe.InitState();
+
+    m_errorMonitor->ExpectSuccess();
+    pipe.CreateGraphicsPipeline();
+    m_errorMonitor->VerifyNotFound();
+}
+
+TEST_F(VkPositiveLayerTest, SubpassWithReadOnlyLayoutWithoutDependency) {
+    TEST_DESCRIPTION("When both subpasses' attachments are the same and layouts are read-only, they don't need dependency.");
+    ASSERT_NO_FATAL_FAILURE(Init());
+
+    auto depth_format = FindSupportedDepthStencilFormat(gpu());
+    if (!depth_format) {
+        printf("%s No Depth + Stencil format found. Skipped.\n", kSkipPrefix);
+        return;
+    }
+
+    // A renderpass with one color attachment.
+    VkAttachmentDescription attachment = {0,
+                                          depth_format,
+                                          VK_SAMPLE_COUNT_1_BIT,
+                                          VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                                          VK_ATTACHMENT_STORE_OP_STORE,
+                                          VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                                          VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                                          VK_IMAGE_LAYOUT_UNDEFINED,
+                                          VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL};
+    const int size = 2;
+    std::array<VkAttachmentDescription, size> attachments = {attachment, attachment};
+
+    VkAttachmentReference att_ref_depth_stencil = {0, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL};
+
+    std::array<VkSubpassDescription, size> subpasses;
+    subpasses[0] = {0, VK_PIPELINE_BIND_POINT_GRAPHICS, 0, 0, 0, nullptr, nullptr, &att_ref_depth_stencil, 0, nullptr};
+    subpasses[1] = {0, VK_PIPELINE_BIND_POINT_GRAPHICS, 0, 0, 0, nullptr, nullptr, &att_ref_depth_stencil, 0, nullptr};
+
+    VkRenderPassCreateInfo rpci = {
+        VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, nullptr, 0, size, attachments.data(), size, subpasses.data(), 0, nullptr};
+
+    VkRenderPass rp;
+    VkResult err = vkCreateRenderPass(m_device->device(), &rpci, nullptr, &rp);
+    ASSERT_VK_SUCCESS(err);
+
+    // A compatible framebuffer.
+    VkImageObj image(m_device);
+    image.Init(32, 32, 1, depth_format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_TILING_LINEAR, 0);
+    ASSERT_TRUE(image.initialized());
+
+    VkImageViewCreateInfo ivci = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                                  nullptr,
+                                  0,
+                                  image.handle(),
+                                  VK_IMAGE_VIEW_TYPE_2D,
+                                  depth_format,
+                                  {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY,
+                                   VK_COMPONENT_SWIZZLE_IDENTITY},
+                                  {VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1}};
+
+    VkImageView view;
+    err = vkCreateImageView(m_device->device(), &ivci, nullptr, &view);
+    ASSERT_VK_SUCCESS(err);
+    std::array<VkImageView, size> views = {view, view};
+
+    VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO, nullptr, 0, rp, size, views.data(), 32, 32, 1};
+    VkFramebuffer fb;
+    err = vkCreateFramebuffer(m_device->device(), &fci, nullptr, &fb);
+    ASSERT_VK_SUCCESS(err);
+
+    VkRenderPassBeginInfo rpbi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, nullptr, rp, fb, {{0, 0}, {32, 32}}, 0, nullptr};
+    m_commandBuffer->begin();
+    vkCmdBeginRenderPass(m_commandBuffer->handle(), &rpbi, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdNextSubpass(m_commandBuffer->handle(), VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdEndRenderPass(m_commandBuffer->handle());
+    m_commandBuffer->end();
+
+    vkDestroyFramebuffer(m_device->device(), fb, nullptr);
+    vkDestroyRenderPass(m_device->device(), rp, nullptr);
+    vkDestroyImageView(m_device->device(), view, nullptr);
+}
+
+TEST_F(VkPositiveLayerTest, GeometryShaderPassthroughNV) {
+    TEST_DESCRIPTION("Test to validate VK_NV_geometry_shader_passthrough");
+
+    ASSERT_NO_FATAL_FAILURE(InitFramework(myDbgFunc, m_errorMonitor));
+
+    VkPhysicalDeviceFeatures available_features = {};
+    ASSERT_NO_FATAL_FAILURE(GetPhysicalDeviceFeatures(&available_features));
+
+    if (!available_features.geometryShader) {
+        printf("%s VkPhysicalDeviceFeatures::geometryShader is not supported, skipping test\n", kSkipPrefix);
+        return;
+    }
+
+    if (DeviceExtensionSupported(gpu(), nullptr, VK_NV_GEOMETRY_SHADER_PASSTHROUGH_EXTENSION_NAME)) {
+        m_device_extension_names.push_back(VK_NV_GEOMETRY_SHADER_PASSTHROUGH_EXTENSION_NAME);
+    } else {
+        printf("%s %s Extension not supported, skipping tests\n", kSkipPrefix, VK_NV_GEOMETRY_SHADER_PASSTHROUGH_EXTENSION_NAME);
+        return;
+    }
+
+    ASSERT_NO_FATAL_FAILURE(InitState());
+    ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
+
+    const char vs_src[] = R"(
+        #version 450
+
+        out gl_PerVertex {
+            vec4 gl_Position;
+        };
+
+        layout(location = 0) out ColorBlock {vec4 vertexColor;};
+
+        const vec2 positions[3] = { vec2( 0.0f, -0.5f),
+                                    vec2( 0.5f,  0.5f),
+                                    vec2(-0.5f,  0.5f)
+                                  };
+
+        const vec4 colors[3] = { vec4(1.0f, 0.0f, 0.0f, 1.0f),
+                                 vec4(0.0f, 1.0f, 0.0f, 1.0f),
+                                 vec4(0.0f, 0.0f, 1.0f, 1.0f)
+                               };
+        void main()
+        {
+            vertexColor = colors[gl_VertexIndex % 3];
+            gl_Position = vec4(positions[gl_VertexIndex % 3], 0.0, 1.0);
+        })";
+
+    const char gs_src[] = R"(
+        #version 450
+        #extension GL_NV_geometry_shader_passthrough: require
+
+        layout(triangles) in;
+        layout(triangle_strip, max_vertices = 3) out;
+
+        layout(passthrough) in gl_PerVertex {vec4 gl_Position;};
+        layout(location = 0, passthrough) in ColorBlock {vec4 vertexColor;};
+
+        void main()
+        {
+           gl_Layer = 0;
+        })";
+
+    const char fs_src[] = R"(
+        #version 450
+
+        layout(location = 0) in ColorBlock {vec4 vertexColor;};
+        layout(location = 0) out vec4 outColor;
+
+        void main() {
+            outColor = vertexColor;
+        })";
+
+    m_errorMonitor->ExpectSuccess();
+
+    const VkPipelineLayoutObj pl(m_device);
+
+    VkPipelineObj pipe(m_device);
+    pipe.AddDefaultColorAttachment();
+
+    VkShaderObj vs(m_device, vs_src, VK_SHADER_STAGE_VERTEX_BIT, this);
+    pipe.AddShader(&vs);
+
+    VkShaderObj gs(m_device, gs_src, VK_SHADER_STAGE_GEOMETRY_BIT, this);
+    pipe.AddShader(&gs);
+
+    VkShaderObj fs(m_device, fs_src, VK_SHADER_STAGE_FRAGMENT_BIT, this);
+    pipe.AddShader(&fs);
+
+    // Create pipeline and make sure that the usage of NV_geometry_shader_passthrough
+    // in the fragment shader does not cause any errors.
+    pipe.CreateVKPipeline(pl.handle(), renderPass());
+
+    m_errorMonitor->VerifyNotFound();
 }

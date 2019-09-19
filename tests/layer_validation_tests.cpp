@@ -27,8 +27,8 @@
 #include "layer_validation_tests.h"
 
 VkFormat FindSupportedDepthStencilFormat(VkPhysicalDevice phy) {
-    VkFormat ds_formats[] = {VK_FORMAT_D16_UNORM_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D32_SFLOAT_S8_UINT};
-    for (uint32_t i = 0; i < sizeof(ds_formats); i++) {
+    const VkFormat ds_formats[] = {VK_FORMAT_D16_UNORM_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D32_SFLOAT_S8_UINT};
+    for (uint32_t i = 0; i < size(ds_formats); ++i) {
         VkFormatProperties format_props;
         vkGetPhysicalDeviceFormatProperties(phy, ds_formats[i], &format_props);
 
@@ -178,7 +178,7 @@ extern "C" void *ReleaseNullFence(void *arg) {
 }
 
 void TestRenderPassCreate(ErrorMonitor *error_monitor, const VkDevice device, const VkRenderPassCreateInfo *create_info,
-                          bool rp2Supported, const char *rp1_vuid, const char *rp2_vuid) {
+                          bool rp2_supported, const char *rp1_vuid, const char *rp2_vuid) {
     VkRenderPass render_pass = VK_NULL_HANDLE;
     VkResult err;
 
@@ -189,7 +189,7 @@ void TestRenderPassCreate(ErrorMonitor *error_monitor, const VkDevice device, co
         error_monitor->VerifyFound();
     }
 
-    if (rp2Supported && rp2_vuid) {
+    if (rp2_supported && rp2_vuid) {
         PFN_vkCreateRenderPass2KHR vkCreateRenderPass2KHR =
             (PFN_vkCreateRenderPass2KHR)vkGetDeviceProcAddr(device, "vkCreateRenderPass2KHR");
         safe_VkRenderPassCreateInfo2KHR create_info2;
@@ -199,6 +199,29 @@ void TestRenderPassCreate(ErrorMonitor *error_monitor, const VkDevice device, co
         err = vkCreateRenderPass2KHR(device, create_info2.ptr(), nullptr, &render_pass);
         if (err == VK_SUCCESS) vkDestroyRenderPass(device, render_pass, nullptr);
         error_monitor->VerifyFound();
+    }
+}
+
+void PositiveTestRenderPassCreate(ErrorMonitor *error_monitor, const VkDevice device, const VkRenderPassCreateInfo *create_info,
+                                  bool rp2_supported) {
+    VkRenderPass render_pass = VK_NULL_HANDLE;
+    VkResult err;
+
+    error_monitor->ExpectSuccess();
+    err = vkCreateRenderPass(device, create_info, nullptr, &render_pass);
+    if (err == VK_SUCCESS) vkDestroyRenderPass(device, render_pass, nullptr);
+    error_monitor->VerifyNotFound();
+
+    if (rp2_supported) {
+        PFN_vkCreateRenderPass2KHR vkCreateRenderPass2KHR =
+            (PFN_vkCreateRenderPass2KHR)vkGetDeviceProcAddr(device, "vkCreateRenderPass2KHR");
+        safe_VkRenderPassCreateInfo2KHR create_info2;
+        ConvertVkRenderPassCreateInfoToV2KHR(create_info, &create_info2);
+
+        error_monitor->ExpectSuccess();
+        err = vkCreateRenderPass2KHR(device, create_info2.ptr(), nullptr, &render_pass);
+        if (err == VK_SUCCESS) vkDestroyRenderPass(device, render_pass, nullptr);
+        error_monitor->VerifyNotFound();
     }
 }
 
@@ -473,16 +496,17 @@ void CreateImageTest(VkLayerTest &test, const VkImageCreateInfo *pCreateInfo, st
     }
 }
 
-void CreateBufferViewTest(VkLayerTest &test, const VkBufferViewCreateInfo *pCreateInfo, std::string code) {
+void CreateBufferViewTest(VkLayerTest &test, const VkBufferViewCreateInfo *pCreateInfo, const std::vector<std::string> &codes) {
     VkResult err;
     VkBufferView view = VK_NULL_HANDLE;
-    if (code.length())
-        test.Monitor()->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, code);
+    if (codes.size())
+        std::for_each(codes.begin(), codes.end(),
+                      [&](const std::string &s) { test.Monitor()->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, s); });
     else
         test.Monitor()->ExpectSuccess();
 
     err = vkCreateBufferView(test.device(), pCreateInfo, NULL, &view);
-    if (code.length())
+    if (codes.size())
         test.Monitor()->VerifyFound();
     else
         test.Monitor()->VerifyNotFound();
@@ -770,6 +794,22 @@ void VkLayerTest::VKTriangleTest(BsoFailSelect failCase) {
             ia_state.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
             ia_state.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
             pipelineobj.SetInputAssembly(&ia_state);
+            break;
+        }
+        case BsoFailLineStipple: {
+            pipelineobj.MakeDynamic(VK_DYNAMIC_STATE_LINE_STIPPLE_EXT);
+            VkPipelineInputAssemblyStateCreateInfo ia_state = {};
+            ia_state.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+            ia_state.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+            pipelineobj.SetInputAssembly(&ia_state);
+
+            VkPipelineRasterizationLineStateCreateInfoEXT line_state = {};
+            line_state.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_EXT;
+            line_state.lineRasterizationMode = VK_LINE_RASTERIZATION_MODE_BRESENHAM_EXT;
+            line_state.stippledLineEnable = VK_TRUE;
+            line_state.lineStippleFactor = 0;
+            line_state.lineStipplePattern = 0;
+            pipelineobj.SetLineState(&line_state);
             break;
         }
         case BsoFailDepthBias: {
@@ -1436,7 +1476,7 @@ void CreatePipelineHelper::InitShaderInfo() {
 
 void CreatePipelineHelper::InitRasterizationInfo() {
     rs_state_ci_.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rs_state_ci_.pNext = nullptr;
+    rs_state_ci_.pNext = &line_state_ci_;
     rs_state_ci_.flags = 0;
     rs_state_ci_.depthClampEnable = VK_FALSE;
     rs_state_ci_.rasterizerDiscardEnable = VK_FALSE;
@@ -1445,6 +1485,15 @@ void CreatePipelineHelper::InitRasterizationInfo() {
     rs_state_ci_.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rs_state_ci_.depthBiasEnable = VK_FALSE;
     rs_state_ci_.lineWidth = 1.0F;
+}
+
+void CreatePipelineHelper::InitLineRasterizationInfo() {
+    line_state_ci_.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_EXT;
+    line_state_ci_.pNext = nullptr;
+    line_state_ci_.lineRasterizationMode = VK_LINE_RASTERIZATION_MODE_DEFAULT_EXT;
+    line_state_ci_.stippledLineEnable = VK_FALSE;
+    line_state_ci_.lineStippleFactor = 0;
+    line_state_ci_.lineStipplePattern = 0;
 }
 
 void CreatePipelineHelper::InitBlendStateInfo() {
@@ -1507,6 +1556,7 @@ void CreatePipelineHelper::InitInfo() {
     InitDynamicStateInfo();
     InitShaderInfo();
     InitRasterizationInfo();
+    InitLineRasterizationInfo();
     InitBlendStateInfo();
     InitGraphicsPipelineInfo();
     InitPipelineCacheInfo();

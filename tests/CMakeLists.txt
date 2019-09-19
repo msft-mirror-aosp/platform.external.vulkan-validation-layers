@@ -61,7 +61,7 @@ endif()
 set(LIBGLM_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/libs)
 
 set(COMMON_CPP vklayertests_pipeline_shader.cpp vklayertests_buffer_image_memory_sampler.cpp vklayertests_others.cpp vklayertests_descriptor_renderpass_framebuffer.cpp
-				vklayertests_command.cpp vkpositivelayertests.cpp vkrenderframework.cpp vktestbinding.cpp vktestframework.cpp test_environment.cpp)
+				vklayertests_command.cpp vklayertests_imageless_framebuffer.cpp vkpositivelayertests.cpp vkrenderframework.cpp vktestbinding.cpp vktestframework.cpp test_environment.cpp)
 
 if(NOT WIN32)
     # extra setup for out-of-tree builds
@@ -93,6 +93,13 @@ if(NOT TARGET vulkan)
         message(STATUS "VULKAN_LOADER_INSTALL_DIR specified, using find_package to locate Vulkan")
     elseif(ENV{VULKAN_LOADER_INSTALL_DIR})
         message(STATUS "VULKAN_LOADER_INSTALL_DIR environment variable specified, using find_package to locate Vulkan")
+    else()
+        set(LOCAL_LOADER TRUE)
+        if(CMAKE_CL_64)
+            set(VULKAN_LOADER_INSTALL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../external/x64")
+        else()
+            set(VULKAN_LOADER_INSTALL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../external/x86")
+        endif()
     endif()
     set(
         CMAKE_PREFIX_PATH
@@ -162,7 +169,7 @@ if(WIN32)
                            COMMAND xcopy /Y /I ${SRC_GTEST_DLLS} ${DST_GTEST_DLLS})
     endif()
     # Copy the loader shared lib (if supplied) to the test application directory so the test app finds it.
-    if(VULKAN_LOADER_INSTALL_DIR)
+    if(VULKAN_LOADER_INSTALL_DIR AND NOT LOCAL_LOADER)
         add_custom_command(TARGET vk_layer_validation_tests POST_BUILD
                            COMMAND ${CMAKE_COMMAND} -E copy ${VULKAN_LOADER_INSTALL_DIR}/bin/vulkan-1.dll
                                    $<TARGET_FILE_DIR:vk_layer_validation_tests>)

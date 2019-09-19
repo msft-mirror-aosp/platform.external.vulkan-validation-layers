@@ -1119,6 +1119,7 @@ bool ObjectLifetimes::PreCallValidateCreateComputePipelines(
     skip |= ValidateObject(device, pipelineCache, kVulkanObjectTypePipelineCache, true, "VUID-vkCreateComputePipelines-pipelineCache-parameter", "VUID-vkCreateComputePipelines-pipelineCache-parent");
     if (pCreateInfos) {
         for (uint32_t index0 = 0; index0 < createInfoCount; ++index0) {
+            skip |= ValidateObject(device, pCreateInfos[index0].stage.module, kVulkanObjectTypeShaderModule, false, "VUID-VkPipelineShaderStageCreateInfo-module-parameter", kVUIDUndefined);
             skip |= ValidateObject(device, pCreateInfos[index0].layout, kVulkanObjectTypePipelineLayout, false, "VUID-VkComputePipelineCreateInfo-layout-parameter", "VUID-VkComputePipelineCreateInfo-commonparent");
             skip |= ValidateObject(device, pCreateInfos[index0].basePipelineHandle, kVulkanObjectTypePipeline, true, kVUIDUndefined, "VUID-VkComputePipelineCreateInfo-commonparent");
         }
@@ -1295,36 +1296,6 @@ void ObjectLifetimes::PostCallRecordCreateDescriptorPool(
     VkResult                                    result) {
     if (result != VK_SUCCESS) return;
     CreateObject(device, *pDescriptorPool, kVulkanObjectTypeDescriptorPool, pAllocator);
-
-}
-
-bool ObjectLifetimes::PreCallValidateCreateFramebuffer(
-    VkDevice                                    device,
-    const VkFramebufferCreateInfo*              pCreateInfo,
-    const VkAllocationCallbacks*                pAllocator,
-    VkFramebuffer*                              pFramebuffer) {
-    bool skip = false;
-    skip |= ValidateObject(device, device, kVulkanObjectTypeDevice, false, "VUID-vkCreateFramebuffer-device-parameter", kVUIDUndefined);
-    if (pCreateInfo) {
-        skip |= ValidateObject(device, pCreateInfo->renderPass, kVulkanObjectTypeRenderPass, false, "VUID-VkFramebufferCreateInfo-renderPass-parameter", "VUID-VkFramebufferCreateInfo-commonparent");
-        if (pCreateInfo->pAttachments) {
-            for (uint32_t index1 = 0; index1 < pCreateInfo->attachmentCount; ++index1) {
-                skip |= ValidateObject(device, pCreateInfo->pAttachments[index1], kVulkanObjectTypeImageView, false, "VUID-VkFramebufferCreateInfo-pAttachments-parameter", "VUID-VkFramebufferCreateInfo-commonparent");
-            }
-        }
-    }
-
-    return skip;
-}
-
-void ObjectLifetimes::PostCallRecordCreateFramebuffer(
-    VkDevice                                    device,
-    const VkFramebufferCreateInfo*              pCreateInfo,
-    const VkAllocationCallbacks*                pAllocator,
-    VkFramebuffer*                              pFramebuffer,
-    VkResult                                    result) {
-    if (result != VK_SUCCESS) return;
-    CreateObject(device, *pFramebuffer, kVulkanObjectTypeFramebuffer, pAllocator);
 
 }
 
@@ -3489,6 +3460,48 @@ bool ObjectLifetimes::PreCallValidateCmdDrawIndexedIndirectCountKHR(
     return skip;
 }
 
+bool ObjectLifetimes::PreCallValidateGetPipelineExecutablePropertiesKHR(
+    VkDevice                                    device,
+    const VkPipelineInfoKHR*                    pPipelineInfo,
+    uint32_t*                                   pExecutableCount,
+    VkPipelineExecutablePropertiesKHR*          pProperties) {
+    bool skip = false;
+    skip |= ValidateObject(device, device, kVulkanObjectTypeDevice, false, "VUID-vkGetPipelineExecutablePropertiesKHR-device-parameter", kVUIDUndefined);
+    if (pPipelineInfo) {
+        skip |= ValidateObject(device, pPipelineInfo->pipeline, kVulkanObjectTypePipeline, false, "VUID-VkPipelineInfoKHR-pipeline-parameter", kVUIDUndefined);
+    }
+
+    return skip;
+}
+
+bool ObjectLifetimes::PreCallValidateGetPipelineExecutableStatisticsKHR(
+    VkDevice                                    device,
+    const VkPipelineExecutableInfoKHR*          pExecutableInfo,
+    uint32_t*                                   pStatisticCount,
+    VkPipelineExecutableStatisticKHR*           pStatistics) {
+    bool skip = false;
+    skip |= ValidateObject(device, device, kVulkanObjectTypeDevice, false, "VUID-vkGetPipelineExecutableStatisticsKHR-device-parameter", kVUIDUndefined);
+    if (pExecutableInfo) {
+        skip |= ValidateObject(device, pExecutableInfo->pipeline, kVulkanObjectTypePipeline, false, "VUID-VkPipelineExecutableInfoKHR-pipeline-parameter", kVUIDUndefined);
+    }
+
+    return skip;
+}
+
+bool ObjectLifetimes::PreCallValidateGetPipelineExecutableInternalRepresentationsKHR(
+    VkDevice                                    device,
+    const VkPipelineExecutableInfoKHR*          pExecutableInfo,
+    uint32_t*                                   pInternalRepresentationCount,
+    VkPipelineExecutableInternalRepresentationKHR* pInternalRepresentations) {
+    bool skip = false;
+    skip |= ValidateObject(device, device, kVulkanObjectTypeDevice, false, "VUID-vkGetPipelineExecutableInternalRepresentationsKHR-device-parameter", kVUIDUndefined);
+    if (pExecutableInfo) {
+        skip |= ValidateObject(device, pExecutableInfo->pipeline, kVulkanObjectTypePipeline, false, "VUID-VkPipelineExecutableInfoKHR-pipeline-parameter", kVUIDUndefined);
+    }
+
+    return skip;
+}
+
 bool ObjectLifetimes::PreCallValidateCreateDebugReportCallbackEXT(
     VkInstance                                  instance,
     const VkDebugReportCallbackCreateInfoEXT*   pCreateInfo,
@@ -4526,6 +4539,14 @@ bool ObjectLifetimes::PreCallValidateCreateAccelerationStructureNV(
     bool skip = false;
     skip |= ValidateObject(device, device, kVulkanObjectTypeDevice, false, "VUID-vkCreateAccelerationStructureNV-device-parameter", kVUIDUndefined);
     if (pCreateInfo) {
+        if (pCreateInfo->info.pGeometries) {
+            for (uint32_t index2 = 0; index2 < pCreateInfo->info.geometryCount; ++index2) {
+                skip |= ValidateObject(device, pCreateInfo->info.pGeometries[index2].geometry.triangles.vertexData, kVulkanObjectTypeBuffer, true, "VUID-VkGeometryTrianglesNV-vertexData-parameter", "VUID-VkGeometryTrianglesNV-commonparent");
+                skip |= ValidateObject(device, pCreateInfo->info.pGeometries[index2].geometry.triangles.indexData, kVulkanObjectTypeBuffer, true, "VUID-VkGeometryTrianglesNV-indexData-parameter", "VUID-VkGeometryTrianglesNV-commonparent");
+                skip |= ValidateObject(device, pCreateInfo->info.pGeometries[index2].geometry.triangles.transformData, kVulkanObjectTypeBuffer, true, "VUID-VkGeometryTrianglesNV-transformData-parameter", "VUID-VkGeometryTrianglesNV-commonparent");
+                skip |= ValidateObject(device, pCreateInfo->info.pGeometries[index2].geometry.aabbs.aabbData, kVulkanObjectTypeBuffer, true, "VUID-VkGeometryAABBNV-aabbData-parameter", kVUIDUndefined);
+            }
+        }
     }
 
     return skip;
@@ -4606,6 +4627,10 @@ bool ObjectLifetimes::PreCallValidateCmdBuildAccelerationStructureNV(
     if (pInfo) {
         if (pInfo->pGeometries) {
             for (uint32_t index1 = 0; index1 < pInfo->geometryCount; ++index1) {
+                skip |= ValidateObject(commandBuffer, pInfo->pGeometries[index1].geometry.triangles.vertexData, kVulkanObjectTypeBuffer, true, "VUID-VkGeometryTrianglesNV-vertexData-parameter", "VUID-VkGeometryTrianglesNV-commonparent");
+                skip |= ValidateObject(commandBuffer, pInfo->pGeometries[index1].geometry.triangles.indexData, kVulkanObjectTypeBuffer, true, "VUID-VkGeometryTrianglesNV-indexData-parameter", "VUID-VkGeometryTrianglesNV-commonparent");
+                skip |= ValidateObject(commandBuffer, pInfo->pGeometries[index1].geometry.triangles.transformData, kVulkanObjectTypeBuffer, true, "VUID-VkGeometryTrianglesNV-transformData-parameter", "VUID-VkGeometryTrianglesNV-commonparent");
+                skip |= ValidateObject(commandBuffer, pInfo->pGeometries[index1].geometry.aabbs.aabbData, kVulkanObjectTypeBuffer, true, "VUID-VkGeometryAABBNV-aabbData-parameter", kVUIDUndefined);
             }
         }
     }
@@ -5093,6 +5118,16 @@ void ObjectLifetimes::PostCallRecordCreateHeadlessSurfaceEXT(
     if (result != VK_SUCCESS) return;
     CreateObject(instance, *pSurface, kVulkanObjectTypeSurfaceKHR, pAllocator);
 
+}
+
+bool ObjectLifetimes::PreCallValidateCmdSetLineStippleEXT(
+    VkCommandBuffer                             commandBuffer,
+    uint32_t                                    lineStippleFactor,
+    uint16_t                                    lineStipplePattern) {
+    bool skip = false;
+    skip |= ValidateObject(commandBuffer, commandBuffer, kVulkanObjectTypeCommandBuffer, false, "VUID-vkCmdSetLineStippleEXT-commandBuffer-parameter", kVUIDUndefined);
+
+    return skip;
 }
 
 bool ObjectLifetimes::PreCallValidateResetQueryPoolEXT(

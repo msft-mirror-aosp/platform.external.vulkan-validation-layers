@@ -140,7 +140,6 @@ class ParameterValidationOutputGenerator(OutputGenerator):
             'vkCreateRenderPass2KHR',
             'vkCreateBuffer',
             'vkCreateImage',
-            'vkCreateImageView',
             'vkCreateGraphicsPipelines',
             'vkCreateComputePipelines',
             "vkCreateRayTracingPipelinesNV",
@@ -159,6 +158,7 @@ class ParameterValidationOutputGenerator(OutputGenerator):
             'vkCmdDrawIndexedIndirect',
             'vkCmdClearAttachments',
             'vkCmdCopyImage',
+            'vkCmdBindIndexBuffer',
             'vkCmdBlitImage',
             'vkCmdCopyBufferToImage',
             'vkCmdCopyImageToBuffer',
@@ -180,6 +180,8 @@ class ParameterValidationOutputGenerator(OutputGenerator):
             'vkCreateAccelerationStructureNV',
             'vkGetAccelerationStructureHandleNV',
             'vkCmdBuildAccelerationStructureNV',
+            'vkCreateFramebuffer',
+            'vkCmdSetLineStippleEXT',
             ]
 
         # Commands to ignore
@@ -610,7 +612,7 @@ class ParameterValidationOutputGenerator(OutputGenerator):
                         enum_entry += '%s, ' % name
                 enum_entry += '};\n'
                 if self.featureExtraProtect is not None:
-                    enum_entry += '#endif // %s' % self.featureExtraProtect
+                    enum_entry += '#endif // %s\n' % self.featureExtraProtect
                 self.enumValueLists += enum_entry
     #
     # Capture command parameter info to be used for param check code generation.
@@ -927,6 +929,9 @@ class ParameterValidationOutputGenerator(OutputGenerator):
         if lenValue:
             count_required_vuid = self.GetVuid(vuid_tag_name, "%s-arraylength" % (lenValue.name))
             array_required_vuid = self.GetVuid(vuid_tag_name, "%s-parameter" % (value.name))
+            # TODO: Remove workaround for missing optional tag in vk.xml
+            if array_required_vuid == '"VUID-VkFramebufferCreateInfo-pAttachments-parameter"':
+                return []
             # This is an array with a pointer to a count value
             if lenValue.ispointer:
                 # If count and array parameters are optional, there will be no validation
@@ -1194,25 +1199,26 @@ class ParameterValidationOutputGenerator(OutputGenerator):
                     elif value.type in self.handleTypes:
                         if not self.isHandleOptional(value, None):
                             usedLines.append('skip |= validate_required_handle("{}", {ppp}"{}"{pps}, {}{});\n'.format(funcName, valueDisplayName, valuePrefix, value.name, **postProcSpec))
-                    elif value.type in self.flags:
-                        flagBitsName = value.type.replace('Flags', 'FlagBits')
-                        if not flagBitsName in self.flagBits:
-                            vuid = self.GetVuid(vuid_name_tag, "%s-zerobitmask" % (value.name))
-                            usedLines.append('skip |= validate_reserved_flags("{}", {ppp}"{}"{pps}, {pf}{}, {});\n'.format(funcName, valueDisplayName, value.name, vuid, pf=valuePrefix, **postProcSpec))
-                        else:
-                            if value.isoptional:
-                                flagsRequired = 'false'
-                                vuid = self.GetVuid(vuid_name_tag, "%s-parameter" % (value.name))
-                            else:
-                                flagsRequired = 'true'
-                                vuid = self.GetVuid(vuid_name_tag, "%s-requiredbitmask" % (value.name))
-                            allFlagsName = 'All' + flagBitsName
-                            usedLines.append('skip |= validate_flags("{}", {ppp}"{}"{pps}, "{}", {}, {pf}{}, {}, false, {});\n'.format(funcName, valueDisplayName, flagBitsName, allFlagsName, value.name, flagsRequired, vuid, pf=valuePrefix, **postProcSpec))
-                    elif value.type in self.flagBits:
-                        flagsRequired = 'false' if value.isoptional else 'true'
-                        allFlagsName = 'All' + value.type
-                        vuid = self.GetVuid(vuid_name_tag, "%s-parameter" % (value.name))
-                        usedLines.append('skip |= validate_flags("{}", {ppp}"{}"{pps}, "{}", {}, {pf}{}, {}, true, {});\n'.format(funcName, valueDisplayName, value.type, allFlagsName, value.name, flagsRequired, vuid, pf=valuePrefix, **postProcSpec))
+                    elif value.type in self.flags and value.type.replace('Flags', 'FlagBits') not in self.flagBits:
+                        vuid = self.GetVuid(vuid_name_tag, "%s-zerobitmask" % (value.name))
+                        usedLines.append('skip |= validate_reserved_flags("{}", {ppp}"{}"{pps}, {pf}{}, {});\n'.format(funcName, valueDisplayName, value.name, vuid, pf=valuePrefix, **postProcSpec))
+                    elif value.type in self.flags or value.type in self.flagBits:
+                        if value.type in self.flags:
+                            flagBitsName = value.type.replace('Flags', 'FlagBits')
+                            flagsType = 'kOptionalFlags' if value.isoptional else 'kRequiredFlags'
+                            invalidVuid = self.GetVuid(vuid_name_tag, "%s-parameter" % (value.name))
+                            zeroVuid = self.GetVuid(vuid_name_tag, "%s-requiredbitmask" % (value.name))
+                        elif value.type in self.flagBits:
+                            flagBitsName = value.type
+                            flagsType = 'kOptionalSingleBit' if value.isoptional else 'kRequiredSingleBit'
+                            invalidVuid = self.GetVuid(vuid_name_tag, "%s-parameter" % (value.name))
+                            zeroVuid = invalidVuid
+                        allFlagsName = 'All' + flagBitsName
+
+                        invalid_vuid = self.GetVuid(vuid_name_tag, "%s-parameter" % (value.name))
+                        allFlagsName = 'All' + flagBitsName
+                        zeroVuidArg = '' if value.isoptional else ', ' + zeroVuid
+                        usedLines.append('skip |= validate_flags("{}", {ppp}"{}"{pps}, "{}", {}, {pf}{}, {}, {}{});\n'.format(funcName, valueDisplayName, flagBitsName, allFlagsName, value.name, flagsType, invalidVuid, zeroVuidArg, pf=valuePrefix, **postProcSpec))
                     elif value.isbool:
                         usedLines.append('skip |= validate_bool32("{}", {ppp}"{}"{pps}, {}{});\n'.format(funcName, valueDisplayName, valuePrefix, value.name, **postProcSpec))
                     elif value.israngedenum:
@@ -1291,7 +1297,7 @@ class ParameterValidationOutputGenerator(OutputGenerator):
                     for param in command.params:
                         params_text += '%s, ' % param.name
                     params_text = params_text[:-2] + ');\n'
-                    cmdDef += '    skip |= manual_PreCallValidate'+ command.name[2:] + '(' + params_text
+                    cmdDef += '    if (!skip) skip |= manual_PreCallValidate'+ command.name[2:] + '(' + params_text
                 cmdDef += '%sreturn skip;\n' % indent
                 cmdDef += '}\n'
                 self.validation.append(cmdDef)

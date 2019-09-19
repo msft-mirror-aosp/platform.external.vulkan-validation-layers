@@ -146,6 +146,10 @@ enum descriptor_req {
     DESCRIPTOR_REQ_COMPONENT_TYPE_UINT = DESCRIPTOR_REQ_COMPONENT_TYPE_SINT << 1,
 };
 
+extern unsigned DescriptorRequirementsBitsFromFormat(VkFormat fmt);
+
+typedef std::map<uint32_t, descriptor_req> BindingReqMap;
+
 struct DESCRIPTOR_POOL_STATE : BASE_NODE {
     VkDescriptorPool pool;
     uint32_t maxSets;        // Max descriptor sets allowed in this pool
@@ -327,6 +331,8 @@ class IMAGE_VIEW_STATE : public BASE_NODE {
     VkImageView image_view;
     VkImageViewCreateInfo create_info;
     VkImageSubresourceRange normalized_subresource_range;
+    VkSampleCountFlagBits samples;
+    unsigned descriptor_format_bits;
     VkSamplerYcbcrConversion samplerConversion;  // Handle of the ycbcr sampler conversion the image was created with, if any
     IMAGE_VIEW_STATE(const IMAGE_STATE *image_state, VkImageView iv, const VkImageViewCreateInfo *ci);
     IMAGE_VIEW_STATE(const IMAGE_VIEW_STATE &rh_obj) = delete;
@@ -358,26 +364,6 @@ struct MemRange {
     VkDeviceSize size;
 };
 
-struct MEMORY_RANGE {
-    uint64_t handle;
-    bool image;   // True for image, false for buffer
-    bool linear;  // True for buffers and linear images
-    VkDeviceMemory memory;
-    VkDeviceSize start;
-    VkDeviceSize size;
-    VkDeviceSize end;  // Store this pre-computed for simplicity
-    // Set of ptrs to every range aliased with this one
-    std::unordered_set<MEMORY_RANGE *> aliases;
-};
-
-static inline VulkanTypedHandle MemoryRangeTypedHandle(const MEMORY_RANGE &range) {
-    // TODO: Convert MEMORY_RANGE to use VulkanTypedHandle internally
-    if (range.image) {
-        return VulkanTypedHandle(CastFromUint64<VkImage>(range.handle), kVulkanObjectTypeImage);
-    }
-    return VulkanTypedHandle(CastFromUint64<VkBuffer>(range.handle), kVulkanObjectTypeBuffer);
-}
-
 // Data struct for tracking memory object
 struct DEVICE_MEMORY_STATE : public BASE_NODE {
     void *object;  // Dispatchable object used to create this memory (device of swapchain)
@@ -388,8 +374,7 @@ struct DEVICE_MEMORY_STATE : public BASE_NODE {
     VkImage dedicated_image;
     bool is_export;
     VkExternalMemoryHandleTypeFlags export_handle_type_flags;
-    std::unordered_set<VulkanTypedHandle> obj_bindings;       // objects bound to this memory
-    std::unordered_map<uint64_t, MEMORY_RANGE> bound_ranges;  // Map of object to its binding range
+    std::unordered_set<VulkanTypedHandle> obj_bindings;  // objects bound to this memory
     // Convenience vectors of handles to speed up iterating over objects independently
     std::unordered_set<uint64_t> bound_images;
     std::unordered_set<uint64_t> bound_buffers;
@@ -829,8 +814,8 @@ class ImageSubresourceLayoutMapImpl : public ImageSubresourceLayoutMap {
         return subres;
     }
 
-    uint32_t LevelLimit(uint32_t level) const { return std::min(image_state_.full_range.levelCount, level); }
-    uint32_t LayerLimit(uint32_t layer) const { return std::min(image_state_.full_range.layerCount, layer); }
+    uint32_t LevelLimit(uint32_t level) const { return (std::min)(image_state_.full_range.levelCount, level); }
+    uint32_t LayerLimit(uint32_t layer) const { return (std::min)(image_state_.full_range.layerCount, layer); }
 
     bool InRange(const VkImageSubresource &subres) const {
         bool in_range = (subres.mipLevel < image_state_.full_range.levelCount) &&
@@ -987,7 +972,8 @@ enum CBStatusFlagBits {
     CBSTATUS_INDEX_BUFFER_BOUND     = 0x00000200,   // Index buffer has been set
     CBSTATUS_EXCLUSIVE_SCISSOR_SET  = 0x00000400,
     CBSTATUS_SHADING_RATE_PALETTE_SET = 0x00000800,
-    CBSTATUS_ALL_STATE_SET          = 0x00000DFF,   // All state set (intentionally exclude index buffer)
+    CBSTATUS_LINE_STIPPLE_SET       = 0x00001000,
+    CBSTATUS_ALL_STATE_SET          = 0x00001DFF,   // All state set (intentionally exclude index buffer)
     // clang-format on
 };
 
@@ -1006,6 +992,7 @@ enum QueryState {
     QUERYSTATE_UNKNOWN,    // Initial state.
     QUERYSTATE_RESET,      // After resetting.
     QUERYSTATE_RUNNING,    // Query running.
+    QUERYSTATE_ENDED,      // Query ended but results may not be available.
     QUERYSTATE_AVAILABLE,  // Results available.
 };
 
@@ -1049,7 +1036,7 @@ struct hash<QueryObject> {
 };
 }  // namespace std
 
-struct DrawData {
+struct CBVertexBufferBindingInfo {
     std::vector<BufferBinding> vertex_buffer_bindings;
 };
 
@@ -1128,19 +1115,6 @@ struct PIPELINE_LAYOUT_STATE {
         compat_for_set.clear();
     }
 };
-
-static inline bool CompatForSet(uint32_t set, const std::vector<PipelineLayoutCompatId> &a,
-                                const std::vector<PipelineLayoutCompatId> &b) {
-    bool result = (set < a.size()) && (set < b.size()) && (a[set] == b[set]);
-    return result;
-}
-
-static inline bool CompatForSet(uint32_t set, const PIPELINE_LAYOUT_STATE *a, const PIPELINE_LAYOUT_STATE *b) {
-    // Intentionally have a result variable to simplify debugging
-    bool result = a && b && CompatForSet(set, a->compat_for_set, b->compat_for_set);
-    return result;
-}
-
 // Shader typedefs needed to store StageStage below
 struct interface_var {
     uint32_t id;
@@ -1171,7 +1145,7 @@ class PIPELINE_STATE : public BASE_NODE {
     uint32_t active_shaders;
     uint32_t duplicate_shaders;
     // Capture which slots (set#->bindings) are actually used by the shaders of this pipeline
-    std::unordered_map<uint32_t, std::map<uint32_t, descriptor_req>> active_slots;
+    std::unordered_map<uint32_t, BindingReqMap> active_slots;
     // Additional metadata needed by pipeline_state initialization and validation
     std::vector<StageState> stage_state;
     // Vtx input info (if any)
@@ -1226,6 +1200,17 @@ class PIPELINE_STATE : public BASE_NODE {
         else
             return VK_PIPELINE_BIND_POINT_MAX_ENUM;
     }
+
+    inline VkPipelineCreateFlags getPipelineCreateFlags() const {
+        if (graphicsPipelineCI.sType == VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO)
+            return graphicsPipelineCI.flags;
+        else if (computePipelineCI.sType == VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO)
+            return computePipelineCI.flags;
+        else if (raytracingPipelineCI.sType == VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_NV)
+            return raytracingPipelineCI.flags;
+        else
+            return 0;
+    }
 };
 
 // Track last states that are bound per pipeline bind point (Gfx & Compute)
@@ -1233,34 +1218,62 @@ struct LAST_BOUND_STATE {
     LAST_BOUND_STATE() { reset(); }  // must define default constructor for portability reasons
     PIPELINE_STATE *pipeline_state;
     VkPipelineLayout pipeline_layout;
-    // Track each set that has been bound
-    // Ordered bound set tracking where index is set# that given set is bound to
-    std::vector<cvdescriptorset::DescriptorSet *> boundDescriptorSets;
     std::unique_ptr<cvdescriptorset::DescriptorSet> push_descriptor_set;
-    // one dynamic offset per dynamic descriptor bound to this CB
-    std::vector<std::vector<uint32_t>> dynamicOffsets;
-    std::vector<PipelineLayoutCompatId> compat_id_for_set;
+
+    // Ordered bound set tracking where index is set# that given set is bound to
+    struct PER_SET {
+        PER_SET()
+            : bound_descriptor_set(nullptr),
+              compat_id_for_set(0),
+              validated_set(nullptr),
+              validated_set_change_count(~0ULL),
+              validated_set_image_layout_change_count(~0ULL),
+              validated_set_binding_req_map() {}
+
+        cvdescriptorset::DescriptorSet *bound_descriptor_set;
+        // one dynamic offset per dynamic descriptor bound to this CB
+        std::vector<uint32_t> dynamicOffsets;
+        PipelineLayoutCompatId compat_id_for_set;
+
+        // Cache most recently validated descriptor state for ValidateCmdBufDrawState/UpdateDrawState
+        const cvdescriptorset::DescriptorSet *validated_set;
+        uint64_t validated_set_change_count;
+        uint64_t validated_set_image_layout_change_count;
+        BindingReqMap validated_set_binding_req_map;
+    };
+
+    std::vector<PER_SET> per_set;
 
     void reset() {
         pipeline_state = nullptr;
         pipeline_layout = VK_NULL_HANDLE;
-        boundDescriptorSets.clear();
         push_descriptor_set = nullptr;
-        dynamicOffsets.clear();
-        compat_id_for_set.clear();
+        per_set.clear();
     }
 
     void UnbindAndResetPushDescriptorSet(cvdescriptorset::DescriptorSet *ds) {
         if (push_descriptor_set) {
-            for (std::size_t i = 0; i < boundDescriptorSets.size(); i++) {
-                if (boundDescriptorSets[i] == push_descriptor_set.get()) {
-                    boundDescriptorSets[i] = nullptr;
+            for (std::size_t i = 0; i < per_set.size(); i++) {
+                if (per_set[i].bound_descriptor_set == push_descriptor_set.get()) {
+                    per_set[i].bound_descriptor_set = nullptr;
                 }
             }
         }
         push_descriptor_set.reset(ds);
     }
 };
+
+static inline bool CompatForSet(uint32_t set, const LAST_BOUND_STATE &a, const std::vector<PipelineLayoutCompatId> &b) {
+    bool result = (set < a.per_set.size()) && (set < b.size()) && (a.per_set[set].compat_id_for_set == b[set]);
+    return result;
+}
+
+static inline bool CompatForSet(uint32_t set, const PIPELINE_LAYOUT_STATE *a, const PIPELINE_LAYOUT_STATE *b) {
+    // Intentionally have a result variable to simplify debugging
+    bool result = a && b && (set < a->compat_for_set.size()) && (set < b->compat_for_set.size()) &&
+                  (a->compat_for_set[set] == b->compat_for_set[set]);
+    return result;
+}
 
 // Types to store queue family ownership (QFO) Transfers
 
@@ -1398,6 +1411,8 @@ struct CMD_BUFFER_STATE : public BASE_NODE {
     VkCommandBufferInheritanceInfo inheritanceInfo;
     VkDevice device;  // device this CB belongs to
     bool hasDrawCmd;
+    bool hasTraceRaysCmd;
+    bool hasDispatchCmd;
     CB_STATE state;        // Track cmd buffer update state
     uint64_t submitCount;  // Number of times CB has been submitted
     typedef uint64_t ImageLayoutUpdateCount;
@@ -1439,20 +1454,17 @@ struct CMD_BUFFER_STATE : public BASE_NODE {
     typedef std::unordered_map<VkImage, std::unique_ptr<ImageSubresourceLayoutMap>> ImageLayoutMap;
     ImageLayoutMap image_layout_map;
     std::unordered_map<VkEvent, VkPipelineStageFlags> eventToStageMap;
-    std::vector<DrawData> draw_data;
-    DrawData current_draw_data;
+    std::vector<CBVertexBufferBindingInfo> cb_vertex_buffer_binding_info;
+    CBVertexBufferBindingInfo current_vertex_buffer_binding_info;
     bool vertex_buffer_used;  // Track for perf warning to make sure any bound vtx buffer used
     VkCommandBuffer primaryCommandBuffer;
-    // Track images and buffers that are updated by this CB at the point of a draw
-    std::unordered_set<VkImageView> updateImages;
-    std::unordered_set<VkBuffer> updateBuffers;
     // If primary, the secondary command buffers we will call.
     // If secondary, the primary command buffers we will be called by.
     std::unordered_set<CMD_BUFFER_STATE *> linkedCommandBuffers;
     // Validation functions run at primary CB queue submit time
     std::vector<std::function<bool()>> queue_submit_functions;
     // Validation functions run when secondary CB is executed in primary
-    std::vector<std::function<bool(CMD_BUFFER_STATE *, VkFramebuffer)>> cmd_execute_commands_functions;
+    std::vector<std::function<bool(const CMD_BUFFER_STATE *, VkFramebuffer)>> cmd_execute_commands_functions;
     std::unordered_set<VkDeviceMemory> memObjs;
     std::vector<std::function<bool(VkQueue)>> eventUpdates;
     std::vector<std::function<bool(VkQueue)>> queryUpdates;
@@ -1464,6 +1476,14 @@ struct CMD_BUFFER_STATE : public BASE_NODE {
     LoggingLabel debug_label;
 };
 
+static inline const QFOTransferBarrierSets<VkImageMemoryBarrier> &GetQFOBarrierSets(
+    const CMD_BUFFER_STATE *cb, const QFOTransferBarrier<VkImageMemoryBarrier>::Tag &type_tag) {
+    return cb->qfo_transfer_image_barriers;
+}
+static inline const QFOTransferBarrierSets<VkBufferMemoryBarrier> &GetQFOBarrierSets(
+    const CMD_BUFFER_STATE *cb, const QFOTransferBarrier<VkBufferMemoryBarrier>::Tag &type_tag) {
+    return cb->qfo_transfer_buffer_barriers;
+}
 static inline QFOTransferBarrierSets<VkImageMemoryBarrier> &GetQFOBarrierSets(
     CMD_BUFFER_STATE *cb, const QFOTransferBarrier<VkImageMemoryBarrier>::Tag &type_tag) {
     return cb->qfo_transfer_image_barriers;
@@ -1539,6 +1559,10 @@ struct DeviceFeatures {
     VkPhysicalDeviceFragmentShaderBarycentricFeaturesNV fragment_shader_barycentric_features;
     VkPhysicalDeviceShaderImageFootprintFeaturesNV shader_image_footprint_features;
     VkPhysicalDeviceFragmentShaderInterlockFeaturesEXT fragment_shader_interlock_features;
+    VkPhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT demote_to_helper_invocation_features;
+    VkPhysicalDeviceTexelBufferAlignmentFeaturesEXT texel_buffer_alignment_features;
+    VkPhysicalDeviceImagelessFramebufferFeaturesKHR imageless_framebuffer_features;
+    VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR pipeline_exe_props_features;
 };
 
 enum RenderPassCreateVersion { RENDER_PASS_VERSION_1 = 0, RENDER_PASS_VERSION_2 = 1 };

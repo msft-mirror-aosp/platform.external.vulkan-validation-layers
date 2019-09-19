@@ -427,110 +427,6 @@ TEST_F(VkLayerTest, SparseResidencyImageCreateUnsupportedSamples) {
     CreateImageTest(*this, &image_create_info, "VUID-VkImageCreateInfo-imageType-00976");
 }
 
-TEST_F(VkLayerTest, InvalidMemoryAliasing) {
-    TEST_DESCRIPTION(
-        "Create a buffer and image, allocate memory, and bind the buffer and image to memory such that they will alias.");
-    VkResult err;
-    bool pass;
-    ASSERT_NO_FATAL_FAILURE(Init());
-
-    VkBuffer buffer, buffer2;
-    VkImage image;
-    VkImage image2;
-    VkDeviceMemory mem;      // buffer will be bound first
-    VkDeviceMemory mem_img;  // image bound first
-    VkMemoryRequirements buff_mem_reqs, img_mem_reqs;
-    VkMemoryRequirements buff_mem_reqs2, img_mem_reqs2;
-
-    VkBufferCreateInfo buf_info = {};
-    buf_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    buf_info.pNext = NULL;
-    buf_info.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-    buf_info.size = 256;
-    buf_info.queueFamilyIndexCount = 0;
-    buf_info.pQueueFamilyIndices = NULL;
-    buf_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    buf_info.flags = 0;
-    err = vkCreateBuffer(m_device->device(), &buf_info, NULL, &buffer);
-    ASSERT_VK_SUCCESS(err);
-
-    vkGetBufferMemoryRequirements(m_device->device(), buffer, &buff_mem_reqs);
-
-    VkImageCreateInfo image_create_info = {};
-    image_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    image_create_info.pNext = NULL;
-    image_create_info.imageType = VK_IMAGE_TYPE_2D;
-    image_create_info.format = VK_FORMAT_R8G8B8A8_UNORM;
-    image_create_info.extent.width = 64;
-    image_create_info.extent.height = 64;
-    image_create_info.extent.depth = 1;
-    image_create_info.mipLevels = 1;
-    image_create_info.arrayLayers = 1;
-    image_create_info.samples = VK_SAMPLE_COUNT_1_BIT;
-    // Image tiling must be optimal to trigger error when aliasing linear buffer
-    image_create_info.tiling = VK_IMAGE_TILING_OPTIMAL;
-    image_create_info.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
-    image_create_info.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-    image_create_info.queueFamilyIndexCount = 0;
-    image_create_info.pQueueFamilyIndices = NULL;
-    image_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    image_create_info.flags = 0;
-
-    err = vkCreateImage(m_device->device(), &image_create_info, NULL, &image);
-    ASSERT_VK_SUCCESS(err);
-    err = vkCreateImage(m_device->device(), &image_create_info, NULL, &image2);
-    ASSERT_VK_SUCCESS(err);
-
-    vkGetImageMemoryRequirements(m_device->device(), image, &img_mem_reqs);
-
-    VkMemoryAllocateInfo alloc_info = {};
-    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    alloc_info.pNext = NULL;
-    alloc_info.memoryTypeIndex = 0;
-    // Ensure memory is big enough for both bindings
-    alloc_info.allocationSize = buff_mem_reqs.size + img_mem_reqs.size;
-    pass = m_device->phy().set_memory_type(buff_mem_reqs.memoryTypeBits & img_mem_reqs.memoryTypeBits, &alloc_info,
-                                           VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    if (!pass) {
-        printf("%s Failed to set memory type.\n", kSkipPrefix);
-        vkDestroyBuffer(m_device->device(), buffer, NULL);
-        vkDestroyImage(m_device->device(), image, NULL);
-        vkDestroyImage(m_device->device(), image2, NULL);
-        return;
-    }
-    err = vkAllocateMemory(m_device->device(), &alloc_info, NULL, &mem);
-    ASSERT_VK_SUCCESS(err);
-    err = vkBindBufferMemory(m_device->device(), buffer, mem, 0);
-    ASSERT_VK_SUCCESS(err);
-
-    vkGetImageMemoryRequirements(m_device->device(), image2, &img_mem_reqs2);
-
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_WARNING_BIT_EXT, "UNASSIGNED-CoreValidation-MemTrack-InvalidAliasing");
-    // VALIDATION FAILURE due to image mapping overlapping buffer mapping
-    err = vkBindImageMemory(m_device->device(), image, mem, 0);
-    m_errorMonitor->VerifyFound();
-
-    // Now correctly bind image2 to second mem allocation before incorrectly
-    // aliasing buffer2
-    err = vkCreateBuffer(m_device->device(), &buf_info, NULL, &buffer2);
-    ASSERT_VK_SUCCESS(err);
-    err = vkAllocateMemory(m_device->device(), &alloc_info, NULL, &mem_img);
-    ASSERT_VK_SUCCESS(err);
-    err = vkBindImageMemory(m_device->device(), image2, mem_img, 0);
-    ASSERT_VK_SUCCESS(err);
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_WARNING_BIT_EXT, "UNASSIGNED-CoreValidation-MemTrack-InvalidAliasing");
-    vkGetBufferMemoryRequirements(m_device->device(), buffer2, &buff_mem_reqs2);
-    err = vkBindBufferMemory(m_device->device(), buffer2, mem_img, 0);
-    m_errorMonitor->VerifyFound();
-
-    vkDestroyBuffer(m_device->device(), buffer, NULL);
-    vkDestroyBuffer(m_device->device(), buffer2, NULL);
-    vkDestroyImage(m_device->device(), image, NULL);
-    vkDestroyImage(m_device->device(), image2, NULL);
-    vkFreeMemory(m_device->device(), mem, NULL);
-    vkFreeMemory(m_device->device(), mem_img, NULL);
-}
-
 TEST_F(VkLayerTest, InvalidMemoryMapping) {
     TEST_DESCRIPTION("Attempt to map memory in a number of incorrect ways");
     VkResult err;
@@ -3328,7 +3224,7 @@ TEST_F(VkLayerTest, InvalidBufferViewCreateInfoEntries) {
     buff_view_ci.buffer = bad_buffer.handle();
     buff_view_ci.format = format_with_uniform_texel_support;
     buff_view_ci.range = VK_WHOLE_SIZE;
-    CreateBufferViewTest(*this, &buff_view_ci, "VUID-VkBufferViewCreateInfo-buffer-00932");
+    CreateBufferViewTest(*this, &buff_view_ci, {"VUID-VkBufferViewCreateInfo-buffer-00932"});
 
     // Create a better test buffer
     const VkBufferCreateInfo buffer_info = VkBufferObj::create_info(resource_size, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT);
@@ -3338,31 +3234,35 @@ TEST_F(VkLayerTest, InvalidBufferViewCreateInfoEntries) {
     // Offset must be less than the size of the buffer, so set it equal to the buffer size to cause an error
     buff_view_ci.buffer = buffer.handle();
     buff_view_ci.offset = buffer.create_info().size;
-    CreateBufferViewTest(*this, &buff_view_ci, "VUID-VkBufferViewCreateInfo-offset-00925");
+    CreateBufferViewTest(*this, &buff_view_ci, {"VUID-VkBufferViewCreateInfo-offset-00925"});
+
+    // Offset must be a multiple of VkPhysicalDeviceLimits::minTexelBufferOffsetAlignment so add 1 to ensure it is not
+    buff_view_ci.offset = minTexelBufferOffsetAlignment + 1;
+    CreateBufferViewTest(*this, &buff_view_ci, {"VUID-VkBufferViewCreateInfo-offset-02749"});
 
     // Set offset to acceptable value for range tests
     buff_view_ci.offset = minTexelBufferOffsetAlignment;
     // Setting range equal to 0 will cause an error to occur
     buff_view_ci.range = 0;
-    CreateBufferViewTest(*this, &buff_view_ci, "VUID-VkBufferViewCreateInfo-range-00928");
+    CreateBufferViewTest(*this, &buff_view_ci, {"VUID-VkBufferViewCreateInfo-range-00928"});
 
     uint32_t format_size = FormatElementSize(buff_view_ci.format);
     // Range must be a multiple of the element size of format, so add one to ensure it is not
     buff_view_ci.range = format_size + 1;
-    CreateBufferViewTest(*this, &buff_view_ci, "VUID-VkBufferViewCreateInfo-range-00929");
+    CreateBufferViewTest(*this, &buff_view_ci, {"VUID-VkBufferViewCreateInfo-range-00929"});
 
     // Twice the element size of format multiplied by VkPhysicalDeviceLimits::maxTexelBufferElements guarantees range divided by the
     // element size is greater than maxTexelBufferElements, causing failure
     buff_view_ci.range = 2 * format_size * dev_limits.maxTexelBufferElements;
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkBufferViewCreateInfo-range-00930");
-    CreateBufferViewTest(*this, &buff_view_ci, "VUID-VkBufferViewCreateInfo-offset-00931");
+    CreateBufferViewTest(*this, &buff_view_ci,
+                         {"VUID-VkBufferViewCreateInfo-range-00930", "VUID-VkBufferViewCreateInfo-offset-00931"});
 
     // Set rage to acceptable value for buffer tests
     buff_view_ci.format = format_without_texel_support;
     buff_view_ci.range = VK_WHOLE_SIZE;
 
     // `buffer` was created using VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT so we can use that for the first buffer test
-    CreateBufferViewTest(*this, &buff_view_ci, "VUID-VkBufferViewCreateInfo-buffer-00933");
+    CreateBufferViewTest(*this, &buff_view_ci, {"VUID-VkBufferViewCreateInfo-buffer-00933"});
 
     // Create a new buffer using VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT
     const VkBufferCreateInfo storage_buffer_info =
@@ -3371,7 +3271,121 @@ TEST_F(VkLayerTest, InvalidBufferViewCreateInfoEntries) {
     storage_buffer.init(*m_device, storage_buffer_info, (VkMemoryPropertyFlags)VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
     buff_view_ci.buffer = storage_buffer.handle();
-    CreateBufferViewTest(*this, &buff_view_ci, "VUID-VkBufferViewCreateInfo-buffer-00934");
+    CreateBufferViewTest(*this, &buff_view_ci, {"VUID-VkBufferViewCreateInfo-buffer-00934"});
+}
+
+TEST_F(VkLayerTest, InvalidTexelBufferAlignment) {
+    TEST_DESCRIPTION("Test VK_EXT_texel_buffer_alignment.");
+
+    if (InstanceExtensionSupported(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME)) {
+        m_instance_extension_names.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+    } else {
+        printf("%s Did not find required instance extension %s; skipped.\n", kSkipPrefix,
+               VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+        return;
+    }
+
+    ASSERT_NO_FATAL_FAILURE(InitFramework(myDbgFunc, m_errorMonitor));
+    std::array<const char *, 1> required_device_extensions = {{VK_EXT_TEXEL_BUFFER_ALIGNMENT_EXTENSION_NAME}};
+    for (auto device_extension : required_device_extensions) {
+        if (DeviceExtensionSupported(gpu(), nullptr, device_extension)) {
+            m_device_extension_names.push_back(device_extension);
+        } else {
+            printf("%s %s Extension not supported, skipping tests\n", kSkipPrefix, device_extension);
+            return;
+        }
+    }
+
+    if (DeviceIsMockICD() || DeviceSimulation()) {
+        printf("%s MockICD does not support this feature, skipping tests\n", kSkipPrefix);
+        return;
+    }
+
+    PFN_vkGetPhysicalDeviceFeatures2KHR vkGetPhysicalDeviceFeatures2KHR =
+        (PFN_vkGetPhysicalDeviceFeatures2KHR)vkGetInstanceProcAddr(instance(), "vkGetPhysicalDeviceFeatures2KHR");
+    ASSERT_TRUE(vkGetPhysicalDeviceFeatures2KHR != nullptr);
+
+    // Create a device that enables texel_buffer_alignment
+    auto texel_buffer_alignment_features = lvl_init_struct<VkPhysicalDeviceTexelBufferAlignmentFeaturesEXT>();
+    auto features2 = lvl_init_struct<VkPhysicalDeviceFeatures2KHR>(&texel_buffer_alignment_features);
+    vkGetPhysicalDeviceFeatures2KHR(gpu(), &features2);
+    texel_buffer_alignment_features.texelBufferAlignment = VK_TRUE;
+
+    VkPhysicalDeviceTexelBufferAlignmentPropertiesEXT align_props = {};
+    align_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXEL_BUFFER_ALIGNMENT_PROPERTIES_EXT;
+    VkPhysicalDeviceProperties2 pd_props2 = {};
+    pd_props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    pd_props2.pNext = &align_props;
+    vkGetPhysicalDeviceProperties2(gpu(), &pd_props2);
+
+    ASSERT_NO_FATAL_FAILURE(InitState(nullptr, &features2));
+    ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
+
+    const VkFormat format_with_uniform_texel_support = VK_FORMAT_R8G8B8A8_UNORM;
+
+    const VkDeviceSize resource_size = 1024;
+    VkBufferCreateInfo buffer_info = VkBufferObj::create_info(
+        resource_size, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT);
+    VkBufferObj buffer;
+    buffer.init(*m_device, buffer_info, (VkMemoryPropertyFlags)VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    // Create a test buffer view
+    VkBufferViewCreateInfo buff_view_ci = {};
+    buff_view_ci.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
+    buff_view_ci.buffer = buffer.handle();
+    buff_view_ci.format = format_with_uniform_texel_support;
+    buff_view_ci.range = VK_WHOLE_SIZE;
+
+    buff_view_ci.offset = 1;
+    std::vector<std::string> expectedErrors;
+    if (buff_view_ci.offset < align_props.storageTexelBufferOffsetAlignmentBytes) {
+        expectedErrors.push_back("VUID-VkBufferViewCreateInfo-buffer-02750");
+    }
+    if (buff_view_ci.offset < align_props.uniformTexelBufferOffsetAlignmentBytes) {
+        expectedErrors.push_back("VUID-VkBufferViewCreateInfo-buffer-02751");
+    }
+    CreateBufferViewTest(*this, &buff_view_ci, expectedErrors);
+    expectedErrors.clear();
+
+    buff_view_ci.offset = 4;
+    if (buff_view_ci.offset < align_props.storageTexelBufferOffsetAlignmentBytes &&
+        !align_props.storageTexelBufferOffsetSingleTexelAlignment) {
+        expectedErrors.push_back("VUID-VkBufferViewCreateInfo-buffer-02750");
+    }
+    if (buff_view_ci.offset < align_props.uniformTexelBufferOffsetAlignmentBytes &&
+        !align_props.uniformTexelBufferOffsetSingleTexelAlignment) {
+        expectedErrors.push_back("VUID-VkBufferViewCreateInfo-buffer-02751");
+    }
+    CreateBufferViewTest(*this, &buff_view_ci, expectedErrors);
+    expectedErrors.clear();
+
+    // Test a 3-component format
+    VkFormatProperties format_properties;
+    vkGetPhysicalDeviceFormatProperties(gpu(), VK_FORMAT_R32G32B32_SFLOAT, &format_properties);
+    if (format_properties.bufferFeatures & VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT) {
+        buffer_info.usage = VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
+        VkBufferObj buffer2;
+        buffer2.init(*m_device, buffer_info, (VkMemoryPropertyFlags)VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        // Create a test buffer view
+        buff_view_ci.buffer = buffer2.handle();
+
+        buff_view_ci.format = VK_FORMAT_R32G32B32_SFLOAT;
+        buff_view_ci.offset = 1;
+        if (buff_view_ci.offset < align_props.uniformTexelBufferOffsetAlignmentBytes) {
+            expectedErrors.push_back("VUID-VkBufferViewCreateInfo-buffer-02751");
+        }
+        CreateBufferViewTest(*this, &buff_view_ci, expectedErrors);
+        expectedErrors.clear();
+
+        buff_view_ci.offset = 4;
+        if (buff_view_ci.offset < align_props.uniformTexelBufferOffsetAlignmentBytes &&
+            !align_props.uniformTexelBufferOffsetSingleTexelAlignment) {
+            expectedErrors.push_back("VUID-VkBufferViewCreateInfo-buffer-02751");
+        }
+        CreateBufferViewTest(*this, &buff_view_ci, expectedErrors);
+        expectedErrors.clear();
+    }
 }
 
 TEST_F(VkLayerTest, FillBufferWithinRenderPass) {
@@ -4496,9 +4510,6 @@ TEST_F(VkLayerTest, VertexBufferInvalid) {
         "Submit a command buffer using deleted vertex buffer, delete a buffer twice, use an invalid offset for each buffer type, "
         "and attempt to bind a null buffer");
 
-    const char *deleted_buffer_in_command_buffer = "UNASSIGNED-CoreValidation-DrawState-InvalidBuffer";
-    const char *invalid_offset_message = "VUID-vkBindBufferMemory-memoryOffset-01036";
-
     ASSERT_NO_FATAL_FAILURE(Init());
     ASSERT_NO_FATAL_FAILURE(InitViewport());
     ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
@@ -4511,23 +4522,23 @@ TEST_F(VkLayerTest, VertexBufferInvalid) {
     m_commandBuffer->begin();
     m_commandBuffer->BeginRenderPass(m_renderPassBeginInfo);
     vkCmdBindPipeline(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_GRAPHICS, pipe.pipeline_);
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "CoreValidation-DrawState-InvalidCommandBuffer-VkBuffer");
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
+                                         "CoreValidation-DrawState-InvalidCommandBuffer-VkDeviceMemory");
 
     {
-        // Create and bind a vertex buffer in a reduced scope, which will cause
-        // it to be deleted upon leaving this scope
+        // Create and bind a vertex buffer in a reduced scope, which will cause it to be deleted upon leaving this scope
         const float vbo_data[3] = {1.f, 0.f, 1.f};
         VkVerticesObj draw_verticies(m_device, 1, 1, sizeof(vbo_data[0]), sizeof(vbo_data) / sizeof(vbo_data[0]), vbo_data);
         draw_verticies.BindVertexBuffers(m_commandBuffer->handle());
         draw_verticies.AddVertexInputToPipeHelpr(&pipe);
+
+        m_commandBuffer->Draw(1, 0, 0, 0);
+
+        m_commandBuffer->EndRenderPass();
     }
 
-    m_commandBuffer->Draw(1, 0, 0, 0);
-
-    m_commandBuffer->EndRenderPass();
-    m_commandBuffer->end();
-
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, deleted_buffer_in_command_buffer);
-    m_commandBuffer->QueueCommandBuffer(false);
+    vkEndCommandBuffer(m_commandBuffer->handle());
     m_errorMonitor->VerifyFound();
 
     {
@@ -4542,7 +4553,7 @@ TEST_F(VkLayerTest, VertexBufferInvalid) {
     m_errorMonitor->SetUnexpectedError("value of pCreateInfo->usage must not be 0");
     if (VkBufferTest::GetTestConditionValid(m_device, VkBufferTest::eInvalidMemoryOffset)) {
         // Create and bind a memory buffer with an invalid offset.
-        m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, invalid_offset_message);
+        m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-vkBindBufferMemory-memoryOffset-01036");
         m_errorMonitor->SetUnexpectedError(
             "If buffer was created with the VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT or VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT, "
             "memoryOffset must be a multiple of VkPhysicalDeviceLimits::minTexelBufferOffsetAlignment");
@@ -5325,13 +5336,10 @@ TEST_F(VkLayerTest, InvalidImageViewUsageCreateInfo) {
 
     // Try a zero usage field
     usage_ci.usage = 0;
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT,
-                                         "vkCreateImageView: Chained VkImageViewUsageCreateInfo usage field must not be 0");
-    CreateImageViewTest(*this, &ivci, "VkImageViewUsageCreateInfo: value of usage must not be 0");
+    CreateImageViewTest(*this, &ivci, "VUID-VkImageViewUsageCreateInfo-usage-requiredbitmask");
 
     // Try an illegal bit in usage field
     usage_ci.usage = 0x10000000 | VK_IMAGE_USAGE_SAMPLED_BIT;
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "UNASSIGNED-GeneralParameterError-UnrecognizedValue");
     CreateImageViewTest(*this, &ivci, "VUID-VkImageViewUsageCreateInfo-usage-parameter");
 }
 
@@ -6050,7 +6058,23 @@ TEST_F(VkLayerTest, CreateImageMinLimitsViolation) {
 TEST_F(VkLayerTest, CreateImageMaxLimitsViolation) {
     TEST_DESCRIPTION("Create invalid image with invalid parameters exceeding physical device limits.");
 
-    ASSERT_NO_FATAL_FAILURE(Init());
+    // Check for VK_KHR_get_physical_device_properties2
+    bool push_physical_device_properties_2_support =
+        InstanceExtensionSupported(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+    if (push_physical_device_properties_2_support) {
+        m_instance_extension_names.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+    }
+
+    ASSERT_NO_FATAL_FAILURE(InitFramework(myDbgFunc, m_errorMonitor));
+
+    bool push_fragment_density_support = false;
+
+    if (push_physical_device_properties_2_support) {
+        push_fragment_density_support = DeviceExtensionSupported(gpu(), nullptr, VK_EXT_FRAGMENT_DENSITY_MAP_EXTENSION_NAME);
+        if (push_fragment_density_support) m_device_extension_names.push_back(VK_EXT_FRAGMENT_DENSITY_MAP_EXTENSION_NAME);
+    }
+
+    ASSERT_NO_FATAL_FAILURE(InitState(nullptr, nullptr, 0));
 
     VkImageCreateInfo tmp_img_ci = {};
     tmp_img_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -6141,6 +6165,23 @@ TEST_F(VkLayerTest, CreateImageMaxLimitsViolation) {
             CreateImageTest(*this, &image_ci, "VUID-VkImageCreateInfo-usage-00965");
         } else {
             printf("%s VkPhysicalDeviceLimits::maxFramebufferHeight is already UINT32_MAX; skipping part of test.\n", kSkipPrefix);
+        }
+    }
+
+    {
+        if (!push_fragment_density_support) {
+            printf("%s VK_EXT_fragment_density_map Extension not supported, skipping tests\n", kSkipPrefix);
+        } else {
+            VkImageCreateInfo image_ci = safe_image_ci;
+            image_ci.usage = VK_IMAGE_USAGE_FRAGMENT_DENSITY_MAP_BIT_EXT;
+            VkImageFormatProperties img_limits;
+            ASSERT_VK_SUCCESS(GPDIFPHelper(gpu(), &image_ci, &img_limits));
+
+            image_ci.extent = {dev_limits.maxFramebufferWidth + 1, 64, 1};
+            CreateImageTest(*this, &image_ci, "VUID-VkImageCreateInfo-usage-02559");
+
+            image_ci.extent = {64, dev_limits.maxFramebufferHeight + 1, 1};
+            CreateImageTest(*this, &image_ci, "VUID-VkImageCreateInfo-usage-02560");
         }
     }
 }
