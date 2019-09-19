@@ -65,8 +65,6 @@ THIS_DIR = os.path.realpath(os.path.dirname(__file__))
 ALL_ARCHITECTURES = (
   'arm',
   'arm64',
-  'mips',
-  'mips64',
   'x86',
   'x86_64',
 )
@@ -76,8 +74,6 @@ ALL_ARCHITECTURES = (
 ALL_ABIS = (
   'armeabi-v7a',
   'arm64-v8a',
-  'mips',
-  'mips64',
   'x86',
   'x86_64',
 )
@@ -89,8 +85,6 @@ def arch_to_abis(arch):
   return {
     'arm': ['armeabi-v7a'],
     'arm64': ['arm64-v8a'],
-    'mips': ['mips'],
-    'mips64': ['mips64'],
     'x86': ['x86'],
     'x86_64': ['x86_64'],
   }[arch]
