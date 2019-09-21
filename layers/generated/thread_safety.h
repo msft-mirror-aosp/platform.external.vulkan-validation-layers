@@ -1,6 +1,6 @@
 
 // This file is ***GENERATED***.  Do Not Edit.
-// See layer_chassis_dispatch_generator.py for modifications.
+// See thread_safety_generator.py for modifications.
 
 /* Copyright (c) 2015-2019 The Khronos Group Inc.
  * Copyright (c) 2015-2019 Valve Corporation
@@ -24,7 +24,8 @@
 
 #pragma once
 
-#include <condition_variable>
+#include <chrono>
+#include <thread>
 #include <mutex>
 #include <vector>
 #include <unordered_set>
@@ -116,32 +117,53 @@ public:
     }
 };
 
+#define THREAD_SAFETY_BUCKETS_LOG2 6
+#define THREAD_SAFETY_BUCKETS (1 << THREAD_SAFETY_BUCKETS_LOG2)
+
+template <typename T> inline uint32_t ThreadSafetyHashObject(T object)
+{
+    uint64_t u64 = (uint64_t)(uintptr_t)object;
+    uint32_t hash = (uint32_t)(u64 >> 32) + (uint32_t)u64;
+    hash ^= (hash >> THREAD_SAFETY_BUCKETS_LOG2) ^ (hash >> (2*THREAD_SAFETY_BUCKETS_LOG2));
+    hash &= (THREAD_SAFETY_BUCKETS-1);
+    return hash;
+}
+
 template <typename T>
 class counter {
 public:
     const char *typeName;
     VkDebugReportObjectTypeEXT objectType;
     debug_report_data **report_data;
-    small_unordered_map<T, object_use_data> uses;
-    std::mutex counter_lock;
-    std::condition_variable counter_condition;
 
+    // Per-bucket locking, to reduce contention.
+    struct CounterBucket {
+        small_unordered_map<T, object_use_data> uses;
+        std::mutex counter_lock;
+    };
+
+    CounterBucket buckets[THREAD_SAFETY_BUCKETS];
+    CounterBucket &GetBucket(T object)
+    {
+        return buckets[ThreadSafetyHashObject(object)];
+    }
 
     void StartWrite(T object) {
         if (object == VK_NULL_HANDLE) {
             return;
         }
+        auto &bucket = GetBucket(object);
         bool skip = false;
         loader_platform_thread_id tid = loader_platform_get_thread_id();
-        std::unique_lock<std::mutex> lock(counter_lock);
-        if (!uses.contains(object)) {
+        std::unique_lock<std::mutex> lock(bucket.counter_lock);
+        if (!bucket.uses.contains(object)) {
             // There is no current use of the object.  Record writer thread.
-            struct object_use_data *use_data = &uses[object];
+            struct object_use_data *use_data = &bucket.uses[object];
             use_data->reader_count = 0;
             use_data->writer_count = 1;
             use_data->thread = tid;
         } else {
-            struct object_use_data *use_data = &uses[object];
+            struct object_use_data *use_data = &bucket.uses[object];
             if (use_data->reader_count == 0) {
                 // There are no readers.  Two writers just collided.
                 if (use_data->thread != tid) {
@@ -151,12 +173,9 @@ public:
                         "thread 0x%" PRIx64 " and thread 0x%" PRIx64,
                         typeName, (uint64_t)use_data->thread, (uint64_t)tid);
                     if (skip) {
-                        // Wait for thread-safe access to object instead of skipping call.
-                        while (uses.contains(object)) {
-                            counter_condition.wait(lock);
-                        }
+                        WaitForObjectIdle(bucket, object, lock);
                         // There is now no current use of the object.  Record writer thread.
-                        struct object_use_data *new_use_data = &uses[object];
+                        struct object_use_data *new_use_data = &bucket.uses[object];
                         new_use_data->thread = tid;
                         new_use_data->reader_count = 0;
                         new_use_data->writer_count = 1;
@@ -179,12 +198,9 @@ public:
                         "thread 0x%" PRIx64 " and thread 0x%" PRIx64,
                         typeName, (uint64_t)use_data->thread, (uint64_t)tid);
                     if (skip) {
-                        // Wait for thread-safe access to object instead of skipping call.
-                        while (uses.contains(object)) {
-                            counter_condition.wait(lock);
-                        }
+                        WaitForObjectIdle(bucket, object, lock);
                         // There is now no current use of the object.  Record writer thread.
-                        struct object_use_data *new_use_data = &uses[object];
+                        struct object_use_data *new_use_data = &bucket.uses[object];
                         new_use_data->thread = tid;
                         new_use_data->reader_count = 0;
                         new_use_data->writer_count = 1;
@@ -206,72 +222,80 @@ public:
         if (object == VK_NULL_HANDLE) {
             return;
         }
+        auto &bucket = GetBucket(object);
         // Object is no longer in use
-        std::unique_lock<std::mutex> lock(counter_lock);
-        uses[object].writer_count -= 1;
-        if ((uses[object].reader_count == 0) && (uses[object].writer_count == 0)) {
-            uses.erase(object);
+        std::unique_lock<std::mutex> lock(bucket.counter_lock);
+        struct object_use_data *use_data = &bucket.uses[object];
+        use_data->writer_count -= 1;
+        if ((use_data->reader_count == 0) && (use_data->writer_count == 0)) {
+            bucket.uses.erase(object);
         }
-        // Notify any waiting threads that this object may be safe to use
-        lock.unlock();
-        counter_condition.notify_all();
     }
 
     void StartRead(T object) {
         if (object == VK_NULL_HANDLE) {
             return;
         }
+        auto &bucket = GetBucket(object);
         bool skip = false;
         loader_platform_thread_id tid = loader_platform_get_thread_id();
-        std::unique_lock<std::mutex> lock(counter_lock);
-        if (!uses.contains(object)) {
+        std::unique_lock<std::mutex> lock(bucket.counter_lock);
+        if (!bucket.uses.contains(object)) {
             // There is no current use of the object.  Record reader count
-            struct object_use_data *use_data = &uses[object];
+            struct object_use_data *use_data = &bucket.uses[object];
             use_data->reader_count = 1;
             use_data->writer_count = 0;
             use_data->thread = tid;
-        } else if (uses[object].writer_count > 0 && uses[object].thread != tid) {
+        } else if (bucket.uses[object].writer_count > 0 && bucket.uses[object].thread != tid) {
             // There is a writer of the object.
-            skip |= false;
-            log_msg(*report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, objectType, (uint64_t)(object), kVUID_Threading_MultipleThreads,
+            skip |= log_msg(*report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT, objectType, (uint64_t)(object),
+                kVUID_Threading_MultipleThreads,
                 "THREADING ERROR : object of type %s is simultaneously used in "
                 "thread 0x%" PRIx64 " and thread 0x%" PRIx64,
-                typeName, (uint64_t)uses[object].thread, (uint64_t)tid);
+                typeName, (uint64_t)bucket.uses[object].thread, (uint64_t)tid);
             if (skip) {
-                // Wait for thread-safe access to object instead of skipping call.
-                while (uses.contains(object)) {
-                    counter_condition.wait(lock);
-                }
+                WaitForObjectIdle(bucket, object, lock);
                 // There is no current use of the object.  Record reader count
-                struct object_use_data *use_data = &uses[object];
+                struct object_use_data *use_data = &bucket.uses[object];
                 use_data->reader_count = 1;
                 use_data->writer_count = 0;
                 use_data->thread = tid;
             } else {
-                uses[object].reader_count += 1;
+                bucket.uses[object].reader_count += 1;
             }
         } else {
             // There are other readers of the object.  Increase reader count
-            uses[object].reader_count += 1;
+            bucket.uses[object].reader_count += 1;
         }
     }
     void FinishRead(T object) {
         if (object == VK_NULL_HANDLE) {
             return;
         }
-        std::unique_lock<std::mutex> lock(counter_lock);
-        uses[object].reader_count -= 1;
-        if ((uses[object].reader_count == 0) && (uses[object].writer_count == 0)) {
-            uses.erase(object);
+        auto &bucket = GetBucket(object);
+        std::unique_lock<std::mutex> lock(bucket.counter_lock);
+        struct object_use_data *use_data = &bucket.uses[object];
+        use_data->reader_count -= 1;
+        if ((use_data->reader_count == 0) && (use_data->writer_count == 0)) {
+            bucket.uses.erase(object);
         }
-        // Notify any waiting threads that this object may be safe to use
-        lock.unlock();
-        counter_condition.notify_all();
     }
     counter(const char *name = "", VkDebugReportObjectTypeEXT type = VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT, debug_report_data **rep_data = nullptr) {
         typeName = name;
         objectType = type;
         report_data = rep_data;
+    }
+
+private:
+    void WaitForObjectIdle(CounterBucket &bucket, T object, std::unique_lock<std::mutex> &lock) {
+        // Wait for thread-safe access to object instead of skipping call.
+        // Don't use condition_variable to wait because it should be extremely
+        // rare to have collisions, but signaling would be very frequent.
+        while (bucket.uses.contains(object)) {
+            lock.unlock();
+            std::this_thread::sleep_for(std::chrono::microseconds(1));
+            lock.lock();
+        }
     }
 };
 
@@ -286,8 +310,17 @@ public:
         return std::unique_lock<std::mutex>(validation_object_mutex, std::defer_lock);
     }
 
-    std::mutex command_pool_lock;
-    std::unordered_map<VkCommandBuffer, VkCommandPool> command_pool_map;
+    // Per-bucket locking, to reduce contention.
+    struct CommandBufferBucket {
+        std::mutex command_pool_lock;
+        small_unordered_map<VkCommandBuffer, VkCommandPool> command_pool_map;
+    };
+
+    CommandBufferBucket buckets[THREAD_SAFETY_BUCKETS];
+    CommandBufferBucket &GetBucket(VkCommandBuffer object)
+    {
+        return buckets[ThreadSafetyHashObject(object)];
+    }
 
     counter<VkCommandBuffer> c_VkCommandBuffer;
     counter<VkDevice> c_VkDevice;
@@ -435,8 +468,9 @@ WRAPPER(uint64_t)
     // VkCommandBuffer needs check for implicit use of command pool
     void StartWriteObject(VkCommandBuffer object, bool lockPool = true) {
         if (lockPool) {
-            std::unique_lock<std::mutex> lock(command_pool_lock);
-            VkCommandPool pool = command_pool_map[object];
+            auto &bucket = GetBucket(object);
+            std::unique_lock<std::mutex> lock(bucket.command_pool_lock);
+            VkCommandPool pool = bucket.command_pool_map[object];
             lock.unlock();
             StartWriteObject(pool);
         }
@@ -445,15 +479,17 @@ WRAPPER(uint64_t)
     void FinishWriteObject(VkCommandBuffer object, bool lockPool = true) {
         c_VkCommandBuffer.FinishWrite(object);
         if (lockPool) {
-            std::unique_lock<std::mutex> lock(command_pool_lock);
-            VkCommandPool pool = command_pool_map[object];
+            auto &bucket = GetBucket(object);
+            std::unique_lock<std::mutex> lock(bucket.command_pool_lock);
+            VkCommandPool pool = bucket.command_pool_map[object];
             lock.unlock();
             FinishWriteObject(pool);
         }
     }
     void StartReadObject(VkCommandBuffer object) {
-        std::unique_lock<std::mutex> lock(command_pool_lock);
-        VkCommandPool pool = command_pool_map[object];
+        auto &bucket = GetBucket(object);
+        std::unique_lock<std::mutex> lock(bucket.command_pool_lock);
+        VkCommandPool pool = bucket.command_pool_map[object];
         lock.unlock();
         // We set up a read guard against the "Contents" counter to catch conflict vs. vkResetCommandPool and vkDestroyCommandPool
         // while *not* establishing a read guard against the command pool counter itself to avoid false postives for
@@ -462,9 +498,10 @@ WRAPPER(uint64_t)
         c_VkCommandBuffer.StartRead(object);
     }
     void FinishReadObject(VkCommandBuffer object) {
+        auto &bucket = GetBucket(object);
         c_VkCommandBuffer.FinishRead(object);
-        std::unique_lock<std::mutex> lock(command_pool_lock);
-        VkCommandPool pool = command_pool_map[object];
+        std::unique_lock<std::mutex> lock(bucket.command_pool_lock);
+        VkCommandPool pool = bucket.command_pool_map[object];
         lock.unlock();
         c_VkCommandPoolContents.FinishRead(pool);
     } 
@@ -2930,6 +2967,45 @@ void PostCallRecordCmdDrawIndexedIndirectCountKHR(
     uint32_t                                    maxDrawCount,
     uint32_t                                    stride);
 
+void PreCallRecordGetPipelineExecutablePropertiesKHR(
+    VkDevice                                    device,
+    const VkPipelineInfoKHR*                    pPipelineInfo,
+    uint32_t*                                   pExecutableCount,
+    VkPipelineExecutablePropertiesKHR*          pProperties);
+
+void PostCallRecordGetPipelineExecutablePropertiesKHR(
+    VkDevice                                    device,
+    const VkPipelineInfoKHR*                    pPipelineInfo,
+    uint32_t*                                   pExecutableCount,
+    VkPipelineExecutablePropertiesKHR*          pProperties,
+    VkResult                                    result);
+
+void PreCallRecordGetPipelineExecutableStatisticsKHR(
+    VkDevice                                    device,
+    const VkPipelineExecutableInfoKHR*          pExecutableInfo,
+    uint32_t*                                   pStatisticCount,
+    VkPipelineExecutableStatisticKHR*           pStatistics);
+
+void PostCallRecordGetPipelineExecutableStatisticsKHR(
+    VkDevice                                    device,
+    const VkPipelineExecutableInfoKHR*          pExecutableInfo,
+    uint32_t*                                   pStatisticCount,
+    VkPipelineExecutableStatisticKHR*           pStatistics,
+    VkResult                                    result);
+
+void PreCallRecordGetPipelineExecutableInternalRepresentationsKHR(
+    VkDevice                                    device,
+    const VkPipelineExecutableInfoKHR*          pExecutableInfo,
+    uint32_t*                                   pInternalRepresentationCount,
+    VkPipelineExecutableInternalRepresentationKHR* pInternalRepresentations);
+
+void PostCallRecordGetPipelineExecutableInternalRepresentationsKHR(
+    VkDevice                                    device,
+    const VkPipelineExecutableInfoKHR*          pExecutableInfo,
+    uint32_t*                                   pInternalRepresentationCount,
+    VkPipelineExecutableInternalRepresentationKHR* pInternalRepresentations,
+    VkResult                                    result);
+
 void PreCallRecordCreateDebugReportCallbackEXT(
     VkInstance                                  instance,
     const VkDebugReportCallbackCreateInfoEXT*   pCreateInfo,
@@ -4149,6 +4225,16 @@ void PostCallRecordCreateHeadlessSurfaceEXT(
     const VkAllocationCallbacks*                pAllocator,
     VkSurfaceKHR*                               pSurface,
     VkResult                                    result);
+
+void PreCallRecordCmdSetLineStippleEXT(
+    VkCommandBuffer                             commandBuffer,
+    uint32_t                                    lineStippleFactor,
+    uint16_t                                    lineStipplePattern);
+
+void PostCallRecordCmdSetLineStippleEXT(
+    VkCommandBuffer                             commandBuffer,
+    uint32_t                                    lineStippleFactor,
+    uint16_t                                    lineStipplePattern);
 
 void PreCallRecordResetQueryPoolEXT(
     VkDevice                                    device,
