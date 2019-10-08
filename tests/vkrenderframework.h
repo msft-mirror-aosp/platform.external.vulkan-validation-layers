@@ -63,6 +63,7 @@ class VkDeviceObj : public vk_testing::Device {
     VkDevice device() { return handle(); }
     void SetDeviceQueue();
     VkQueueObj *GetDefaultQueue();
+    VkQueueObj *GetDefaultComputeQueue();
 
     uint32_t id;
     VkPhysicalDeviceProperties props;
@@ -215,6 +216,8 @@ class VkCommandBufferObj : public vk_testing::CommandBuffer {
                          const VkImageSubresourceRange *pRanges);
     void ClearDepthStencilImage(VkImage image, VkImageLayout imageLayout, const VkClearDepthStencilValue *pColor,
                                 uint32_t rangeCount, const VkImageSubresourceRange *pRanges);
+    void BuildAccelerationStructure(VkAccelerationStructureObj *as, VkBuffer scratchBuffer);
+    void BuildAccelerationStructure(VkAccelerationStructureObj *as, VkBuffer scratchBuffer, VkBuffer instanceData);
 
    protected:
     VkDeviceObj *m_device;
@@ -449,6 +452,7 @@ class VkPipelineObj : public vk_testing::Pipeline {
     void SetTessellation(const VkPipelineTessellationStateCreateInfo *te_state);
     void SetViewport(const vector<VkViewport> viewports);
     void SetScissor(const vector<VkRect2D> scissors);
+    void SetLineState(const VkPipelineRasterizationLineStateCreateInfoEXT *line_state);
 
     void InitGraphicsPipelineCreateInfo(VkGraphicsPipelineCreateInfo *gp_ci);
 
@@ -464,6 +468,7 @@ class VkPipelineObj : public vk_testing::Pipeline {
     VkPipelineMultisampleStateCreateInfo m_ms_state;
     VkPipelineTessellationStateCreateInfo const *m_te_state;
     VkPipelineDynamicStateCreateInfo m_pd_state;
+    VkPipelineRasterizationLineStateCreateInfoEXT m_line_state;
     vector<VkDynamicState> m_dynamic_state_enables;
     vector<VkViewport> m_viewports;
     vector<VkRect2D> m_scissors;
