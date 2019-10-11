@@ -27,7 +27,7 @@
 #include "cast_utils.h"
 #include "layer_validation_tests.h"
 
-TEST_F(VkLayerTest, GpuValidationArrayOOB) {
+TEST_F(VkLayerTest, GpuValidationArrayOOBGraphicsShaders) {
     TEST_DESCRIPTION(
         "GPU validation: Verify detection of out-of-bounds descriptor array indexing and use of uninitialized descriptors.");
     if (!VkRenderFramework::DeviceCanDraw()) {
@@ -286,9 +286,34 @@ TEST_F(VkLayerTest, GpuValidationArrayOOB) {
         "void main(){\n"
         "   uFragColor = colors[index].val;\n"
         "}\n";
+    char const *gsSource =
+        "#version 450\n"
+        "#extension GL_EXT_nonuniform_qualifier : enable\n "
+        "layout(triangles) in;\n"
+        "layout(triangle_strip, max_vertices=3) out;\n"
+        "layout(location=0) in VertexData { vec4 x; } gs_in[];\n"
+        "layout(std140, set = 0, binding = 0) uniform ufoo { uint index; } uniform_index_buffer;\n"
+        "layout(set = 0, binding = 1) buffer bfoo { vec4 val; } adds[];\n"
+        "void main() {\n"
+        "   gl_Position = gs_in[0].x + adds[uniform_index_buffer.index].val.x;\n"
+        "   EmitVertex();\n"
+        "}\n";
+    static const char *tesSource =
+        "#version 450\n"
+        "#extension GL_EXT_nonuniform_qualifier : enable\n "
+        "layout(std140, set = 0, binding = 0) uniform ufoo { uint index; } uniform_index_buffer;\n"
+        "layout(set = 0, binding = 1) buffer bfoo { vec4 val; } adds[];\n"
+        "layout(triangles, equal_spacing, cw) in;\n"
+        "void main() {\n"
+        "    gl_Position = adds[uniform_index_buffer.index].val;\n"
+        "}\n";
+
     struct TestCase {
         char const *vertex_source;
         char const *fragment_source;
+        char const *geometry_source;
+        char const *tess_ctrl_source;
+        char const *tess_eval_source;
         bool debug;
         const VkPipelineLayoutObj *pipeline_layout;
         const OneOffDescriptorSet *descriptor_set;
@@ -297,33 +322,47 @@ TEST_F(VkLayerTest, GpuValidationArrayOOB) {
     };
 
     std::vector<TestCase> tests;
-    tests.push_back({vsSource_vert, fsSource_vert, false, &pipeline_layout, &descriptor_set, 25,
+    tests.push_back({vsSource_vert, fsSource_vert, nullptr, nullptr, nullptr, false, &pipeline_layout, &descriptor_set, 25,
                      "Index of 25 used to index descriptor array of length 6."});
-    tests.push_back({vsSource_frag, fsSource_frag, false, &pipeline_layout, &descriptor_set, 25,
+    tests.push_back({vsSource_frag, fsSource_frag, nullptr, nullptr, nullptr, false, &pipeline_layout, &descriptor_set, 25,
                      "Index of 25 used to index descriptor array of length 6."});
 #if !defined(ANDROID)
     // The Android test framework uses shaderc for online compilations.  Even when configured to compile with debug info,
     // shaderc seems to drop the OpLine instructions from the shader binary.  This causes the following two tests to fail
     // on Android platforms.  Skip these tests until the shaderc issue is understood/resolved.
-    tests.push_back({vsSource_vert, fsSource_vert, true, &pipeline_layout, &descriptor_set, 25,
+    tests.push_back({vsSource_vert, fsSource_vert, nullptr, nullptr, nullptr, true, &pipeline_layout, &descriptor_set, 25,
                      "gl_Position += 1e-30 * texture(tex[uniform_index_buffer.tex_index[0]], vec2(0, 0));"});
-    tests.push_back({vsSource_frag, fsSource_frag, true, &pipeline_layout, &descriptor_set, 25,
+    tests.push_back({vsSource_frag, fsSource_frag, nullptr, nullptr, nullptr, true, &pipeline_layout, &descriptor_set, 25,
                      "uFragColor = texture(tex[index], vec2(0, 0));"});
 #endif
     if (descriptor_indexing) {
-        tests.push_back({vsSource_frag, fsSource_frag_runtime, false, &pipeline_layout, &descriptor_set, 25,
-                         "Index of 25 used to index descriptor array of length 6."});
-        tests.push_back({vsSource_frag, fsSource_frag_runtime, false, &pipeline_layout, &descriptor_set, 5,
-                         "Descriptor index 5 is uninitialized"});
+        tests.push_back({vsSource_frag, fsSource_frag_runtime, nullptr, nullptr, nullptr, false, &pipeline_layout, &descriptor_set,
+                         25, "Index of 25 used to index descriptor array of length 6."});
+        tests.push_back({vsSource_frag, fsSource_frag_runtime, nullptr, nullptr, nullptr, false, &pipeline_layout, &descriptor_set,
+                         5, "Descriptor index 5 is uninitialized"});
         // Pick 6 below because it is less than the maximum specified, but more than the actual specified
-        tests.push_back({vsSource_frag, fsSource_frag_runtime, false, &pipeline_layout_variable, &descriptor_set_variable, 6,
-                         "Index of 6 used to index descriptor array of length 6."});
-        tests.push_back({vsSource_frag, fsSource_frag_runtime, false, &pipeline_layout_variable, &descriptor_set_variable, 5,
-                         "Descriptor index 5 is uninitialized"});
-        tests.push_back({vsSource_frag, fsSource_buffer, false, &pipeline_layout_buffer, &descriptor_set_buffer, 25,
-                         "Index of 25 used to index descriptor array of length 6."});
-        tests.push_back({vsSource_frag, fsSource_buffer, false, &pipeline_layout_buffer, &descriptor_set_buffer, 5,
-                         "Descriptor index 5 is uninitialized"});
+        tests.push_back({vsSource_frag, fsSource_frag_runtime, nullptr, nullptr, nullptr, false, &pipeline_layout_variable,
+                         &descriptor_set_variable, 6, "Index of 6 used to index descriptor array of length 6."});
+        tests.push_back({vsSource_frag, fsSource_frag_runtime, nullptr, nullptr, nullptr, false, &pipeline_layout_variable,
+                         &descriptor_set_variable, 5, "Descriptor index 5 is uninitialized"});
+        tests.push_back({vsSource_frag, fsSource_buffer, nullptr, nullptr, nullptr, false, &pipeline_layout_buffer,
+                         &descriptor_set_buffer, 25, "Index of 25 used to index descriptor array of length 6."});
+        tests.push_back({vsSource_frag, fsSource_buffer, nullptr, nullptr, nullptr, false, &pipeline_layout_buffer,
+                         &descriptor_set_buffer, 5, "Descriptor index 5 is uninitialized"});
+        if (m_device->phy().features().geometryShader) {
+            // OOB Geometry
+            tests.push_back({bindStateVertShaderText, bindStateFragShaderText, gsSource, nullptr, nullptr, false,
+                             &pipeline_layout_buffer, &descriptor_set_buffer, 25, "Stage = Geometry"});
+            // Uninitialized Geometry
+            tests.push_back({bindStateVertShaderText, bindStateFragShaderText, gsSource, nullptr, nullptr, false,
+                             &pipeline_layout_buffer, &descriptor_set_buffer, 5, "Stage = Geometry"});
+        }
+        if (m_device->phy().features().tessellationShader) {
+            tests.push_back({bindStateVertShaderText, bindStateFragShaderText, nullptr, bindStateTscShaderText, tesSource, false,
+                             &pipeline_layout_buffer, &descriptor_set_buffer, 25, "Stage = Tessellation Eval"});
+            tests.push_back({bindStateVertShaderText, bindStateFragShaderText, nullptr, bindStateTscShaderText, tesSource, false,
+                             &pipeline_layout_buffer, &descriptor_set_buffer, 5, "Stage = Tessellation Eval"});
+        }
     }
 
     VkViewport viewport = m_viewports[0];
@@ -339,9 +378,34 @@ TEST_F(VkLayerTest, GpuValidationArrayOOB) {
         m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, iter.expected_error);
         VkShaderObj vs(m_device, iter.vertex_source, VK_SHADER_STAGE_VERTEX_BIT, this, "main", iter.debug);
         VkShaderObj fs(m_device, iter.fragment_source, VK_SHADER_STAGE_FRAGMENT_BIT, this, "main", iter.debug);
+        VkShaderObj *gs = nullptr;
+        VkShaderObj *tcs = nullptr;
+        VkShaderObj *tes = nullptr;
         VkPipelineObj pipe(m_device);
         pipe.AddShader(&vs);
         pipe.AddShader(&fs);
+        if (iter.geometry_source) {
+            gs = new VkShaderObj(m_device, iter.geometry_source, VK_SHADER_STAGE_GEOMETRY_BIT, this, "main", iter.debug);
+            pipe.AddShader(gs);
+        }
+        if (iter.tess_ctrl_source && iter.tess_eval_source) {
+            tcs = new VkShaderObj(m_device, iter.tess_ctrl_source, VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT, this, "main",
+                                  iter.debug);
+            tes = new VkShaderObj(m_device, iter.tess_eval_source, VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT, this, "main",
+                                  iter.debug);
+            pipe.AddShader(tcs);
+            pipe.AddShader(tes);
+            VkPipelineInputAssemblyStateCreateInfo iasci{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO, nullptr, 0,
+                                                         VK_PRIMITIVE_TOPOLOGY_PATCH_LIST, VK_FALSE};
+            VkPipelineTessellationDomainOriginStateCreateInfo tessellationDomainOriginStateInfo = {
+                VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_DOMAIN_ORIGIN_STATE_CREATE_INFO, VK_NULL_HANDLE,
+                VK_TESSELLATION_DOMAIN_ORIGIN_UPPER_LEFT};
+
+            VkPipelineTessellationStateCreateInfo tsci{VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO,
+                                                       &tessellationDomainOriginStateInfo, 0, 3};
+            pipe.SetTessellation(&tsci);
+            pipe.SetInputAssembly(&iasci);
+        }
         pipe.AddDefaultColorAttachment();
         err = pipe.CreateVKPipeline(iter.pipeline_layout->handle(), renderPass());
         ASSERT_VK_SUCCESS(err);
@@ -361,9 +425,931 @@ TEST_F(VkLayerTest, GpuValidationArrayOOB) {
         vkQueueSubmit(m_device->m_queue, 1, &submit_info, VK_NULL_HANDLE);
         vkQueueWaitIdle(m_device->m_queue);
         m_errorMonitor->VerifyFound();
+        if (gs) {
+            delete gs;
+        }
+        if (tcs && tes) {
+            delete tcs;
+            delete tes;
+        }
+    }
+    auto c_queue = m_device->GetDefaultComputeQueue();
+    if (c_queue && descriptor_indexing) {
+        char const *csSource =
+            "#version 450\n"
+            "#extension GL_EXT_nonuniform_qualifier : enable\n "
+            "layout(set = 0, binding = 0) uniform ufoo { uint index; } u_index;"
+            "layout(set = 0, binding = 1) buffer StorageBuffer {\n"
+            "    uint data;\n"
+            "} Data[];\n"
+            "void main() {\n"
+            "   Data[(u_index.index - 1)].data = Data[u_index.index].data;\n"
+            "}\n";
+
+        auto shader_module = new VkShaderObj(m_device, csSource, VK_SHADER_STAGE_COMPUTE_BIT, this);
+
+        VkPipelineShaderStageCreateInfo stage;
+        stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stage.pNext = nullptr;
+        stage.flags = 0;
+        stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        stage.module = shader_module->handle();
+        stage.pName = "main";
+        stage.pSpecializationInfo = nullptr;
+
+        // CreateComputePipelines
+        VkComputePipelineCreateInfo pipeline_info = {};
+        pipeline_info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        pipeline_info.pNext = nullptr;
+        pipeline_info.flags = 0;
+        pipeline_info.layout = pipeline_layout_buffer.handle();
+        pipeline_info.basePipelineHandle = VK_NULL_HANDLE;
+        pipeline_info.basePipelineIndex = -1;
+        pipeline_info.stage = stage;
+
+        VkPipeline c_pipeline;
+        vkCreateComputePipelines(device(), VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &c_pipeline);
+        VkCommandBufferBeginInfo begin_info = {};
+        VkCommandBufferInheritanceInfo hinfo = {};
+        hinfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
+        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        begin_info.pInheritanceInfo = &hinfo;
+
+        m_commandBuffer->begin(&begin_info);
+        vkCmdBindPipeline(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_COMPUTE, c_pipeline);
+        vkCmdBindDescriptorSets(m_commandBuffer->handle(), VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout_buffer.handle(), 0, 1,
+                                &descriptor_set_buffer.set_, 0, nullptr);
+        vkCmdDispatch(m_commandBuffer->handle(), 1, 1, 1);
+        m_commandBuffer->end();
+
+        // Uninitialized
+        uint32_t *data = (uint32_t *)buffer0.memory().map();
+        data[0] = 5;
+        buffer0.memory().unmap();
+        m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "Stage = Compute");
+        vkQueueSubmit(c_queue->handle(), 1, &submit_info, VK_NULL_HANDLE);
+        vkQueueWaitIdle(m_device->m_queue);
+        m_errorMonitor->VerifyFound();
+        // Out of Bounds
+        data = (uint32_t *)buffer0.memory().map();
+        data[0] = 25;
+        buffer0.memory().unmap();
+        m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "Stage = Compute");
+        vkQueueSubmit(c_queue->handle(), 1, &submit_info, VK_NULL_HANDLE);
+        vkQueueWaitIdle(m_device->m_queue);
+        m_errorMonitor->VerifyFound();
+        vkDestroyPipeline(m_device->handle(), c_pipeline, NULL);
+        vkDestroyShaderModule(m_device->handle(), shader_module->handle(), NULL);
     }
     return;
 }
+
+TEST_F(VkLayerTest, GpuValidationArrayOOBRayTracingShaders) {
+    TEST_DESCRIPTION(
+        "GPU validation: Verify detection of out-of-bounds descriptor array indexing and use of uninitialized descriptors for "
+        "ray tracing shaders.");
+
+    std::array<const char *, 1> required_instance_extensions = {VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME};
+    for (auto instance_extension : required_instance_extensions) {
+        if (InstanceExtensionSupported(instance_extension)) {
+            m_instance_extension_names.push_back(instance_extension);
+        } else {
+            printf("%s Did not find required instance extension %s; skipped.\n", kSkipPrefix, instance_extension);
+            return;
+        }
+    }
+
+    VkValidationFeatureEnableEXT validation_feature_enables[] = {VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT};
+    VkValidationFeaturesEXT validation_features = {};
+    validation_features.sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT;
+    validation_features.enabledValidationFeatureCount = 1;
+    validation_features.pEnabledValidationFeatures = validation_feature_enables;
+    bool descriptor_indexing = CheckDescriptorIndexingSupportAndInitFramework(
+        this, m_instance_extension_names, m_device_extension_names, &validation_features, m_errorMonitor);
+
+    if (DeviceIsMockICD() || DeviceSimulation()) {
+        printf("%s Test not supported by MockICD, skipping tests\n", kSkipPrefix);
+        return;
+    }
+
+    std::array<const char *, 2> required_device_extensions = {VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME,
+                                                              VK_NV_RAY_TRACING_EXTENSION_NAME};
+    for (auto device_extension : required_device_extensions) {
+        if (DeviceExtensionSupported(gpu(), nullptr, device_extension)) {
+            m_device_extension_names.push_back(device_extension);
+        } else {
+            printf("%s %s Extension not supported, skipping tests\n", kSkipPrefix, device_extension);
+            return;
+        }
+    }
+
+    VkPhysicalDeviceFeatures2KHR features2 = {};
+    auto indexing_features = lvl_init_struct<VkPhysicalDeviceDescriptorIndexingFeaturesEXT>();
+    if (descriptor_indexing) {
+        PFN_vkGetPhysicalDeviceFeatures2KHR vkGetPhysicalDeviceFeatures2KHR =
+            (PFN_vkGetPhysicalDeviceFeatures2KHR)vkGetInstanceProcAddr(instance(), "vkGetPhysicalDeviceFeatures2KHR");
+        ASSERT_TRUE(vkGetPhysicalDeviceFeatures2KHR != nullptr);
+
+        features2 = lvl_init_struct<VkPhysicalDeviceFeatures2KHR>(&indexing_features);
+        vkGetPhysicalDeviceFeatures2KHR(gpu(), &features2);
+
+        if (!indexing_features.runtimeDescriptorArray || !indexing_features.descriptorBindingPartiallyBound ||
+            !indexing_features.descriptorBindingSampledImageUpdateAfterBind ||
+            !indexing_features.descriptorBindingVariableDescriptorCount) {
+            printf("Not all descriptor indexing features supported, skipping descriptor indexing tests\n");
+            descriptor_indexing = false;
+        }
+    }
+    VkCommandPoolCreateFlags pool_flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    ASSERT_NO_FATAL_FAILURE(InitState(nullptr, &features2, pool_flags));
+
+    PFN_vkGetPhysicalDeviceProperties2KHR vkGetPhysicalDeviceProperties2KHR =
+        (PFN_vkGetPhysicalDeviceProperties2KHR)vkGetInstanceProcAddr(instance(), "vkGetPhysicalDeviceProperties2KHR");
+    ASSERT_TRUE(vkGetPhysicalDeviceProperties2KHR != nullptr);
+
+    auto ray_tracing_properties = lvl_init_struct<VkPhysicalDeviceRayTracingPropertiesNV>();
+    auto properties2 = lvl_init_struct<VkPhysicalDeviceProperties2KHR>(&ray_tracing_properties);
+    vkGetPhysicalDeviceProperties2KHR(gpu(), &properties2);
+    if (ray_tracing_properties.maxTriangleCount == 0) {
+        printf("%s Did not find required ray tracing properties; skipped.\n", kSkipPrefix);
+        return;
+    }
+
+    VkQueue ray_tracing_queue = m_device->m_queue;
+    uint32_t ray_tracing_queue_family_index = 0;
+
+    // If supported, run on the compute only queue.
+    uint32_t compute_only_queue_family_index = m_device->QueueFamilyMatching(VK_QUEUE_COMPUTE_BIT, VK_QUEUE_GRAPHICS_BIT);
+    if (compute_only_queue_family_index != UINT32_MAX) {
+        const auto &compute_only_queues = m_device->queue_family_queues(compute_only_queue_family_index);
+        if (!compute_only_queues.empty()) {
+            ray_tracing_queue = compute_only_queues[0]->handle();
+            ray_tracing_queue_family_index = compute_only_queue_family_index;
+        }
+    }
+
+    VkCommandPoolObj ray_tracing_command_pool(m_device, ray_tracing_queue_family_index,
+                                              VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
+    VkCommandBufferObj ray_tracing_command_buffer(m_device, &ray_tracing_command_pool);
+
+    struct AABB {
+        float min_x;
+        float min_y;
+        float min_z;
+        float max_x;
+        float max_y;
+        float max_z;
+    };
+
+    const std::vector<AABB> aabbs = {{-1.0f, -1.0f, -1.0f, +1.0f, +1.0f, +1.0f}};
+
+    struct VkGeometryInstanceNV {
+        float transform[12];
+        uint32_t instanceCustomIndex : 24;
+        uint32_t mask : 8;
+        uint32_t instanceOffset : 24;
+        uint32_t flags : 8;
+        uint64_t accelerationStructureHandle;
+    };
+
+    VkDeviceSize aabb_buffer_size = sizeof(AABB) * aabbs.size();
+    VkBufferObj aabb_buffer;
+    aabb_buffer.init(*m_device, aabb_buffer_size, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                     VK_BUFFER_USAGE_RAY_TRACING_BIT_NV, {ray_tracing_queue_family_index});
+
+    uint8_t *mapped_aabb_buffer_data = (uint8_t *)aabb_buffer.memory().map();
+    std::memcpy(mapped_aabb_buffer_data, (uint8_t *)aabbs.data(), static_cast<std::size_t>(aabb_buffer_size));
+    aabb_buffer.memory().unmap();
+
+    VkGeometryNV geometry = {};
+    geometry.sType = VK_STRUCTURE_TYPE_GEOMETRY_NV;
+    geometry.geometryType = VK_GEOMETRY_TYPE_AABBS_NV;
+    geometry.geometry.triangles = {};
+    geometry.geometry.triangles.sType = VK_STRUCTURE_TYPE_GEOMETRY_TRIANGLES_NV;
+    geometry.geometry.aabbs = {};
+    geometry.geometry.aabbs.sType = VK_STRUCTURE_TYPE_GEOMETRY_AABB_NV;
+    geometry.geometry.aabbs.aabbData = aabb_buffer.handle();
+    geometry.geometry.aabbs.numAABBs = static_cast<uint32_t>(aabbs.size());
+    geometry.geometry.aabbs.offset = 0;
+    geometry.geometry.aabbs.stride = static_cast<VkDeviceSize>(sizeof(AABB));
+    geometry.flags = 0;
+
+    VkAccelerationStructureInfoNV bot_level_as_info = {};
+    bot_level_as_info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_INFO_NV;
+    bot_level_as_info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_NV;
+    bot_level_as_info.instanceCount = 0;
+    bot_level_as_info.geometryCount = 1;
+    bot_level_as_info.pGeometries = &geometry;
+
+    VkAccelerationStructureCreateInfoNV bot_level_as_create_info = {};
+    bot_level_as_create_info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_NV;
+    bot_level_as_create_info.info = bot_level_as_info;
+
+    VkAccelerationStructureObj bot_level_as(*m_device, bot_level_as_create_info);
+
+    const std::vector<VkGeometryInstanceNV> instances = {
+        VkGeometryInstanceNV{
+            {
+                // clang-format off
+                1.0f, 0.0f, 0.0f, 0.0f,
+                0.0f, 1.0f, 0.0f, 0.0f,
+                0.0f, 0.0f, 1.0f, 0.0f,
+                // clang-format on
+            },
+            0,
+            0xFF,
+            0,
+            VK_GEOMETRY_INSTANCE_TRIANGLE_CULL_DISABLE_BIT_NV,
+            bot_level_as.opaque_handle(),
+        },
+    };
+
+    VkDeviceSize instance_buffer_size = sizeof(VkGeometryInstanceNV) * instances.size();
+    VkBufferObj instance_buffer;
+    instance_buffer.init(*m_device, instance_buffer_size,
+                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                         VK_BUFFER_USAGE_RAY_TRACING_BIT_NV, {ray_tracing_queue_family_index});
+
+    uint8_t *mapped_instance_buffer_data = (uint8_t *)instance_buffer.memory().map();
+    std::memcpy(mapped_instance_buffer_data, (uint8_t *)instances.data(), static_cast<std::size_t>(instance_buffer_size));
+    instance_buffer.memory().unmap();
+
+    VkAccelerationStructureInfoNV top_level_as_info = {};
+    top_level_as_info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_INFO_NV;
+    top_level_as_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_NV;
+    top_level_as_info.instanceCount = 1;
+    top_level_as_info.geometryCount = 0;
+
+    VkAccelerationStructureCreateInfoNV top_level_as_create_info = {};
+    top_level_as_create_info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_NV;
+    top_level_as_create_info.info = top_level_as_info;
+
+    VkAccelerationStructureObj top_level_as(*m_device, top_level_as_create_info);
+
+    VkDeviceSize scratch_buffer_size = std::max(bot_level_as.build_scratch_memory_requirements().memoryRequirements.size,
+                                                top_level_as.build_scratch_memory_requirements().memoryRequirements.size);
+    VkBufferObj scratch_buffer;
+    scratch_buffer.init(*m_device, scratch_buffer_size, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_BUFFER_USAGE_RAY_TRACING_BIT_NV);
+
+    ray_tracing_command_buffer.begin();
+
+    // Build bot level acceleration structure
+    ray_tracing_command_buffer.BuildAccelerationStructure(&bot_level_as, scratch_buffer.handle());
+
+    // Barrier to prevent using scratch buffer for top level build before bottom level build finishes
+    VkMemoryBarrier memory_barrier = {};
+    memory_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    memory_barrier.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_NV | VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_NV;
+    memory_barrier.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_NV | VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_NV;
+    ray_tracing_command_buffer.PipelineBarrier(VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_NV,
+                                               VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_NV, 0, 1, &memory_barrier, 0,
+                                               nullptr, 0, nullptr);
+
+    // Build top level acceleration structure
+    ray_tracing_command_buffer.BuildAccelerationStructure(&top_level_as, scratch_buffer.handle(), instance_buffer.handle());
+
+    ray_tracing_command_buffer.end();
+
+    VkSubmitInfo submit_info = {};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &ray_tracing_command_buffer.handle();
+    vkQueueSubmit(ray_tracing_queue, 1, &submit_info, VK_NULL_HANDLE);
+    vkQueueWaitIdle(ray_tracing_queue);
+    m_errorMonitor->VerifyNotFound();
+
+    VkTextureObj texture(m_device, nullptr);
+    VkSamplerObj sampler(m_device);
+
+    VkDeviceSize storage_buffer_size = 1024;
+    VkBufferObj storage_buffer;
+    storage_buffer.init(*m_device, storage_buffer_size, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, {ray_tracing_queue_family_index});
+
+    VkDeviceSize shader_binding_table_buffer_size = ray_tracing_properties.shaderGroupHandleSize * 4ull;
+    VkBufferObj shader_binding_table_buffer;
+    shader_binding_table_buffer.init(*m_device, shader_binding_table_buffer_size,
+                                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                                     VK_BUFFER_USAGE_RAY_TRACING_BIT_NV, {ray_tracing_queue_family_index});
+
+    // Setup descriptors!
+    const VkShaderStageFlags kAllRayTracingStages = VK_SHADER_STAGE_RAYGEN_BIT_NV | VK_SHADER_STAGE_ANY_HIT_BIT_NV |
+                                                    VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV | VK_SHADER_STAGE_MISS_BIT_NV |
+                                                    VK_SHADER_STAGE_INTERSECTION_BIT_NV | VK_SHADER_STAGE_CALLABLE_BIT_NV;
+
+    void *layout_pnext = nullptr;
+    void *allocate_pnext = nullptr;
+    VkDescriptorPoolCreateFlags pool_create_flags = 0;
+    VkDescriptorSetLayoutCreateFlags layout_create_flags = 0;
+    VkDescriptorBindingFlagsEXT ds_binding_flags[3] = {};
+    VkDescriptorSetLayoutBindingFlagsCreateInfoEXT layout_createinfo_binding_flags[1] = {};
+    if (descriptor_indexing) {
+        ds_binding_flags[0] = 0;
+        ds_binding_flags[1] = 0;
+        ds_binding_flags[2] = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT_EXT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT_EXT;
+
+        layout_createinfo_binding_flags[0].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
+        layout_createinfo_binding_flags[0].pNext = NULL;
+        layout_createinfo_binding_flags[0].bindingCount = 3;
+        layout_createinfo_binding_flags[0].pBindingFlags = ds_binding_flags;
+        layout_create_flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT_EXT;
+        pool_create_flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT_EXT;
+        layout_pnext = layout_createinfo_binding_flags;
+    }
+
+    // Prepare descriptors
+    OneOffDescriptorSet ds(m_device,
+                           {
+                               {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_NV, 1, kAllRayTracingStages, nullptr},
+                               {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, kAllRayTracingStages, nullptr},
+                               {2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 6, kAllRayTracingStages, nullptr},
+                           },
+                           layout_create_flags, layout_pnext, pool_create_flags);
+
+    VkDescriptorSetVariableDescriptorCountAllocateInfoEXT variable_count = {};
+    uint32_t desc_counts;
+    if (descriptor_indexing) {
+        layout_create_flags = 0;
+        pool_create_flags = 0;
+        ds_binding_flags[2] =
+            VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT_EXT | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT;
+        desc_counts = 6;  // We'll reserve 8 spaces in the layout, but the descriptor will only use 6
+        variable_count.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO_EXT;
+        variable_count.descriptorSetCount = 1;
+        variable_count.pDescriptorCounts = &desc_counts;
+        allocate_pnext = &variable_count;
+    }
+
+    OneOffDescriptorSet ds_variable(m_device,
+                                    {
+                                        {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_NV, 1, kAllRayTracingStages, nullptr},
+                                        {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, kAllRayTracingStages, nullptr},
+                                        {2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8, kAllRayTracingStages, nullptr},
+                                    },
+                                    layout_create_flags, layout_pnext, pool_create_flags, allocate_pnext);
+
+    VkAccelerationStructureNV top_level_as_handle = top_level_as.handle();
+    VkWriteDescriptorSetAccelerationStructureNV write_descript_set_as = {};
+    write_descript_set_as.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_NV;
+    write_descript_set_as.accelerationStructureCount = 1;
+    write_descript_set_as.pAccelerationStructures = &top_level_as_handle;
+
+    VkDescriptorBufferInfo descriptor_buffer_info = {};
+    descriptor_buffer_info.buffer = storage_buffer.handle();
+    descriptor_buffer_info.offset = 0;
+    descriptor_buffer_info.range = storage_buffer_size;
+
+    VkDescriptorImageInfo descriptor_image_infos[6] = {};
+    for (int i = 0; i < 6; i++) {
+        descriptor_image_infos[i] = texture.DescriptorImageInfo();
+        descriptor_image_infos[i].sampler = sampler.handle();
+        descriptor_image_infos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    }
+
+    VkWriteDescriptorSet descriptor_writes[3] = {};
+    descriptor_writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptor_writes[0].dstSet = ds.set_;
+    descriptor_writes[0].dstBinding = 0;
+    descriptor_writes[0].descriptorCount = 1;
+    descriptor_writes[0].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_NV;
+    descriptor_writes[0].pNext = &write_descript_set_as;
+
+    descriptor_writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptor_writes[1].dstSet = ds.set_;
+    descriptor_writes[1].dstBinding = 1;
+    descriptor_writes[1].descriptorCount = 1;
+    descriptor_writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    descriptor_writes[1].pBufferInfo = &descriptor_buffer_info;
+
+    descriptor_writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptor_writes[2].dstSet = ds.set_;
+    descriptor_writes[2].dstBinding = 2;
+    if (descriptor_indexing) {
+        descriptor_writes[2].descriptorCount = 5;  // Intentionally don't write index 5
+    } else {
+        descriptor_writes[2].descriptorCount = 6;
+    }
+    descriptor_writes[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    descriptor_writes[2].pImageInfo = descriptor_image_infos;
+    vkUpdateDescriptorSets(m_device->device(), 3, descriptor_writes, 0, NULL);
+    if (descriptor_indexing) {
+        descriptor_writes[0].dstSet = ds_variable.set_;
+        descriptor_writes[1].dstSet = ds_variable.set_;
+        descriptor_writes[2].dstSet = ds_variable.set_;
+        vkUpdateDescriptorSets(m_device->device(), 3, descriptor_writes, 0, NULL);
+    }
+
+    const VkPipelineLayoutObj pipeline_layout(m_device, {&ds.layout_});
+    const VkPipelineLayoutObj pipeline_layout_variable(m_device, {&ds_variable.layout_});
+
+    const auto SetImagesArrayLength = [](const std::string &shader_template, const std::string &length_str) {
+        const std::string to_replace = "IMAGES_ARRAY_LENGTH";
+
+        std::string result = shader_template;
+        auto position = result.find(to_replace);
+        assert(position != std::string::npos);
+        result.replace(position, to_replace.length(), length_str);
+        return result;
+    };
+
+    const std::string rgen_source_template = R"(#version 460
+        #extension GL_EXT_nonuniform_qualifier : require
+        #extension GL_EXT_samplerless_texture_functions : require
+        #extension GL_NV_ray_tracing : require
+
+        layout(set = 0, binding = 0) uniform accelerationStructureNV topLevelAS;
+        layout(set = 0, binding = 1, std430) buffer RayTracingSbo {
+	        uint rgen_index;
+	        uint ahit_index;
+	        uint chit_index;
+	        uint miss_index;
+	        uint intr_index;
+	        uint call_index;
+
+	        uint rgen_ran;
+	        uint ahit_ran;
+	        uint chit_ran;
+	        uint miss_ran;
+	        uint intr_ran;
+	        uint call_ran;
+
+	        float result1;
+	        float result2;
+	        float result3;
+        } sbo;
+        layout(set = 0, binding = 2) uniform texture2D textures[IMAGES_ARRAY_LENGTH];
+
+        layout(location = 0) rayPayloadNV vec3 payload;
+        layout(location = 3) callableDataNV vec3 callableData;
+
+        void main() {
+            sbo.rgen_ran = 1;
+
+	        executeCallableNV(0, 3);
+	        sbo.result1 = callableData.x;
+
+	        vec3 origin = vec3(0.0f, 0.0f, -2.0f);
+	        vec3 direction = vec3(0.0f, 0.0f, 1.0f);
+
+	        traceNV(topLevelAS, gl_RayFlagsNoneNV, 0xFF, 0, 1, 0, origin, 0.001, direction, 10000.0, 0);
+	        sbo.result2 = payload.x;
+
+	        traceNV(topLevelAS, gl_RayFlagsNoneNV, 0xFF, 0, 1, 0, origin, 0.001, -direction, 10000.0, 0);
+	        sbo.result3 = payload.x;
+
+            if (sbo.rgen_index > 0) {
+                // OOB here:
+                sbo.result3 = texelFetch(textures[sbo.rgen_index], ivec2(0, 0), 0).x;
+            }
+        }
+        )";
+
+    const std::string rgen_source = SetImagesArrayLength(rgen_source_template, "6");
+    const std::string rgen_source_runtime = SetImagesArrayLength(rgen_source_template, "");
+
+    const std::string ahit_source_template = R"(#version 460
+        #extension GL_EXT_nonuniform_qualifier : require
+        #extension GL_EXT_samplerless_texture_functions : require
+        #extension GL_NV_ray_tracing : require
+
+        layout(set = 0, binding = 1, std430) buffer StorageBuffer {
+	        uint rgen_index;
+	        uint ahit_index;
+	        uint chit_index;
+	        uint miss_index;
+	        uint intr_index;
+	        uint call_index;
+
+	        uint rgen_ran;
+	        uint ahit_ran;
+	        uint chit_ran;
+	        uint miss_ran;
+	        uint intr_ran;
+	        uint call_ran;
+
+	        float result1;
+	        float result2;
+	        float result3;
+        } sbo;
+        layout(set = 0, binding = 2) uniform texture2D textures[IMAGES_ARRAY_LENGTH];
+
+        hitAttributeNV vec3 hitValue;
+
+        layout(location = 0) rayPayloadInNV vec3 payload;
+
+        void main() {
+	        sbo.ahit_ran = 2;
+
+	        payload = vec3(0.1234f);
+
+            if (sbo.ahit_index > 0) {
+                // OOB here:
+                payload.x = texelFetch(textures[sbo.ahit_index], ivec2(0, 0), 0).x;
+            }
+        }
+    )";
+    const std::string ahit_source = SetImagesArrayLength(ahit_source_template, "6");
+    const std::string ahit_source_runtime = SetImagesArrayLength(ahit_source_template, "");
+
+    const std::string chit_source_template = R"(#version 460
+        #extension GL_EXT_nonuniform_qualifier : require
+        #extension GL_EXT_samplerless_texture_functions : require
+        #extension GL_NV_ray_tracing : require
+
+        layout(set = 0, binding = 1, std430) buffer RayTracingSbo {
+	        uint rgen_index;
+	        uint ahit_index;
+	        uint chit_index;
+	        uint miss_index;
+	        uint intr_index;
+	        uint call_index;
+
+	        uint rgen_ran;
+	        uint ahit_ran;
+	        uint chit_ran;
+	        uint miss_ran;
+	        uint intr_ran;
+	        uint call_ran;
+
+	        float result1;
+	        float result2;
+	        float result3;
+        } sbo;
+        layout(set = 0, binding = 2) uniform texture2D textures[IMAGES_ARRAY_LENGTH];
+
+        layout(location = 0) rayPayloadInNV vec3 payload;
+
+        hitAttributeNV vec3 attribs;
+
+        void main() {
+            sbo.chit_ran = 3;
+
+            payload = attribs;
+            if (sbo.chit_index > 0) {
+                // OOB here:
+                payload.x = texelFetch(textures[sbo.chit_index], ivec2(0, 0), 0).x;
+            }
+        }
+        )";
+    const std::string chit_source = SetImagesArrayLength(chit_source_template, "6");
+    const std::string chit_source_runtime = SetImagesArrayLength(chit_source_template, "");
+
+    const std::string miss_source_template = R"(#version 460
+        #extension GL_EXT_nonuniform_qualifier : enable
+        #extension GL_EXT_samplerless_texture_functions : require
+        #extension GL_NV_ray_tracing : require
+
+        layout(set = 0, binding = 1, std430) buffer RayTracingSbo {
+	        uint rgen_index;
+	        uint ahit_index;
+	        uint chit_index;
+	        uint miss_index;
+	        uint intr_index;
+	        uint call_index;
+
+	        uint rgen_ran;
+	        uint ahit_ran;
+	        uint chit_ran;
+	        uint miss_ran;
+	        uint intr_ran;
+	        uint call_ran;
+
+	        float result1;
+	        float result2;
+	        float result3;
+        } sbo;
+        layout(set = 0, binding = 2) uniform texture2D textures[IMAGES_ARRAY_LENGTH];
+
+        layout(location = 0) rayPayloadInNV vec3 payload;
+
+        void main() {
+            sbo.miss_ran = 4;
+
+            payload = vec3(1.0, 0.0, 0.0);
+
+            if (sbo.miss_index > 0) {
+                // OOB here:
+                payload.x = texelFetch(textures[sbo.miss_index], ivec2(0, 0), 0).x;
+            }
+        }
+    )";
+    const std::string miss_source = SetImagesArrayLength(miss_source_template, "6");
+    const std::string miss_source_runtime = SetImagesArrayLength(miss_source_template, "");
+
+    const std::string intr_source_template = R"(#version 460
+        #extension GL_EXT_nonuniform_qualifier : require
+        #extension GL_EXT_samplerless_texture_functions : require
+        #extension GL_NV_ray_tracing : require
+
+        layout(set = 0, binding = 1, std430) buffer StorageBuffer {
+	        uint rgen_index;
+	        uint ahit_index;
+	        uint chit_index;
+	        uint miss_index;
+	        uint intr_index;
+	        uint call_index;
+
+	        uint rgen_ran;
+	        uint ahit_ran;
+	        uint chit_ran;
+	        uint miss_ran;
+	        uint intr_ran;
+	        uint call_ran;
+
+	        float result1;
+	        float result2;
+	        float result3;
+        } sbo;
+        layout(set = 0, binding = 2) uniform texture2D textures[IMAGES_ARRAY_LENGTH];
+
+        hitAttributeNV vec3 hitValue;
+
+        void main() {
+	        sbo.intr_ran = 5;
+
+	        hitValue = vec3(0.0f, 0.5f, 0.0f);
+
+	        reportIntersectionNV(1.0f, 0);
+
+            if (sbo.intr_index > 0) {
+                // OOB here:
+                hitValue.x = texelFetch(textures[sbo.intr_index], ivec2(0, 0), 0).x;
+            }
+        }
+    )";
+    const std::string intr_source = SetImagesArrayLength(intr_source_template, "6");
+    const std::string intr_source_runtime = SetImagesArrayLength(intr_source_template, "");
+
+    const std::string call_source_template = R"(#version 460
+        #extension GL_EXT_nonuniform_qualifier : require
+        #extension GL_EXT_samplerless_texture_functions : require
+        #extension GL_NV_ray_tracing : require
+
+        layout(set = 0, binding = 1, std430) buffer StorageBuffer {
+	        uint rgen_index;
+	        uint ahit_index;
+	        uint chit_index;
+	        uint miss_index;
+	        uint intr_index;
+	        uint call_index;
+
+	        uint rgen_ran;
+	        uint ahit_ran;
+	        uint chit_ran;
+	        uint miss_ran;
+	        uint intr_ran;
+	        uint call_ran;
+
+	        float result1;
+	        float result2;
+	        float result3;
+        } sbo;
+        layout(set = 0, binding = 2) uniform texture2D textures[IMAGES_ARRAY_LENGTH];
+
+        layout(location = 3) callableDataInNV vec3 callableData;
+
+        void main() {
+	        sbo.call_ran = 6;
+
+	        callableData = vec3(0.1234f);
+
+            if (sbo.call_index > 0) {
+                // OOB here:
+                callableData.x = texelFetch(textures[sbo.call_index], ivec2(0, 0), 0).x;
+            }
+        }
+    )";
+    const std::string call_source = SetImagesArrayLength(call_source_template, "6");
+    const std::string call_source_runtime = SetImagesArrayLength(call_source_template, "");
+
+    struct TestCase {
+        const std::string &rgen_shader_source;
+        const std::string &ahit_shader_source;
+        const std::string &chit_shader_source;
+        const std::string &miss_shader_source;
+        const std::string &intr_shader_source;
+        const std::string &call_shader_source;
+        bool variable_length;
+        uint32_t rgen_index;
+        uint32_t ahit_index;
+        uint32_t chit_index;
+        uint32_t miss_index;
+        uint32_t intr_index;
+        uint32_t call_index;
+        const char *expected_error;
+    };
+
+    std::vector<TestCase> tests;
+    tests.push_back({rgen_source, ahit_source, chit_source, miss_source, intr_source, call_source, false, 25, 0, 0, 0, 0, 0,
+                     "Index of 25 used to index descriptor array of length 6."});
+    tests.push_back({rgen_source, ahit_source, chit_source, miss_source, intr_source, call_source, false, 0, 25, 0, 0, 0, 0,
+                     "Index of 25 used to index descriptor array of length 6."});
+    tests.push_back({rgen_source, ahit_source, chit_source, miss_source, intr_source, call_source, false, 0, 0, 25, 0, 0, 0,
+                     "Index of 25 used to index descriptor array of length 6."});
+    tests.push_back({rgen_source, ahit_source, chit_source, miss_source, intr_source, call_source, false, 0, 0, 0, 25, 0, 0,
+                     "Index of 25 used to index descriptor array of length 6."});
+    tests.push_back({rgen_source, ahit_source, chit_source, miss_source, intr_source, call_source, false, 0, 0, 0, 0, 25, 0,
+                     "Index of 25 used to index descriptor array of length 6."});
+    tests.push_back({rgen_source, ahit_source, chit_source, miss_source, intr_source, call_source, false, 0, 0, 0, 0, 0, 25,
+                     "Index of 25 used to index descriptor array of length 6."});
+
+    if (descriptor_indexing) {
+        tests.push_back({rgen_source_runtime, ahit_source_runtime, chit_source_runtime, miss_source_runtime, intr_source_runtime,
+                         call_source_runtime, true, 25, 0, 0, 0, 0, 0, "Index of 25 used to index descriptor array of length 6."});
+        tests.push_back({rgen_source_runtime, ahit_source_runtime, chit_source_runtime, miss_source_runtime, intr_source_runtime,
+                         call_source_runtime, true, 0, 25, 0, 0, 0, 0, "Index of 25 used to index descriptor array of length 6."});
+        tests.push_back({rgen_source_runtime, ahit_source_runtime, chit_source_runtime, miss_source_runtime, intr_source_runtime,
+                         call_source_runtime, true, 0, 0, 25, 0, 0, 0, "Index of 25 used to index descriptor array of length 6."});
+        tests.push_back({rgen_source_runtime, ahit_source_runtime, chit_source_runtime, miss_source_runtime, intr_source_runtime,
+                         call_source_runtime, true, 0, 0, 0, 25, 0, 0, "Index of 25 used to index descriptor array of length 6."});
+        tests.push_back({rgen_source_runtime, ahit_source_runtime, chit_source_runtime, miss_source_runtime, intr_source_runtime,
+                         call_source_runtime, true, 0, 0, 0, 0, 25, 0, "Index of 25 used to index descriptor array of length 6."});
+        tests.push_back({rgen_source_runtime, ahit_source_runtime, chit_source_runtime, miss_source_runtime, intr_source_runtime,
+                         call_source_runtime, true, 0, 0, 0, 0, 0, 25, "Index of 25 used to index descriptor array of length 6."});
+
+        // For this group, 6 is less than max specified (max specified is 8) but more than actual specified (actual specified is 5)
+        tests.push_back({rgen_source_runtime, ahit_source_runtime, chit_source_runtime, miss_source_runtime, intr_source_runtime,
+                         call_source_runtime, true, 6, 0, 0, 0, 0, 0, "Index of 6 used to index descriptor array of length 6."});
+        tests.push_back({rgen_source_runtime, ahit_source_runtime, chit_source_runtime, miss_source_runtime, intr_source_runtime,
+                         call_source_runtime, true, 0, 6, 0, 0, 0, 0, "Index of 6 used to index descriptor array of length 6."});
+        tests.push_back({rgen_source_runtime, ahit_source_runtime, chit_source_runtime, miss_source_runtime, intr_source_runtime,
+                         call_source_runtime, true, 0, 0, 6, 0, 0, 0, "Index of 6 used to index descriptor array of length 6."});
+        tests.push_back({rgen_source_runtime, ahit_source_runtime, chit_source_runtime, miss_source_runtime, intr_source_runtime,
+                         call_source_runtime, true, 0, 0, 0, 6, 0, 0, "Index of 6 used to index descriptor array of length 6."});
+        tests.push_back({rgen_source_runtime, ahit_source_runtime, chit_source_runtime, miss_source_runtime, intr_source_runtime,
+                         call_source_runtime, true, 0, 0, 0, 0, 6, 0, "Index of 6 used to index descriptor array of length 6."});
+        tests.push_back({rgen_source_runtime, ahit_source_runtime, chit_source_runtime, miss_source_runtime, intr_source_runtime,
+                         call_source_runtime, true, 0, 0, 0, 0, 0, 6, "Index of 6 used to index descriptor array of length 6."});
+
+        tests.push_back({rgen_source_runtime, ahit_source_runtime, chit_source_runtime, miss_source_runtime, intr_source_runtime,
+                         call_source_runtime, true, 5, 0, 0, 0, 0, 0, "Descriptor index 5 is uninitialized."});
+        tests.push_back({rgen_source_runtime, ahit_source_runtime, chit_source_runtime, miss_source_runtime, intr_source_runtime,
+                         call_source_runtime, true, 0, 5, 0, 0, 0, 0, "Descriptor index 5 is uninitialized."});
+        tests.push_back({rgen_source_runtime, ahit_source_runtime, chit_source_runtime, miss_source_runtime, intr_source_runtime,
+                         call_source_runtime, true, 0, 0, 5, 0, 0, 0, "Descriptor index 5 is uninitialized."});
+        tests.push_back({rgen_source_runtime, ahit_source_runtime, chit_source_runtime, miss_source_runtime, intr_source_runtime,
+                         call_source_runtime, true, 0, 0, 0, 5, 0, 0, "Descriptor index 5 is uninitialized."});
+        tests.push_back({rgen_source_runtime, ahit_source_runtime, chit_source_runtime, miss_source_runtime, intr_source_runtime,
+                         call_source_runtime, true, 0, 0, 0, 0, 5, 0, "Descriptor index 5 is uninitialized."});
+        tests.push_back({rgen_source_runtime, ahit_source_runtime, chit_source_runtime, miss_source_runtime, intr_source_runtime,
+                         call_source_runtime, true, 0, 0, 0, 0, 0, 5, "Descriptor index 5 is uninitialized."});
+    }
+
+    PFN_vkCreateRayTracingPipelinesNV vkCreateRayTracingPipelinesNV = reinterpret_cast<PFN_vkCreateRayTracingPipelinesNV>(
+        vkGetDeviceProcAddr(m_device->handle(), "vkCreateRayTracingPipelinesNV"));
+    ASSERT_TRUE(vkCreateRayTracingPipelinesNV != nullptr);
+
+    PFN_vkGetRayTracingShaderGroupHandlesNV vkGetRayTracingShaderGroupHandlesNV =
+        reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesNV>(
+            vkGetDeviceProcAddr(m_device->handle(), "vkGetRayTracingShaderGroupHandlesNV"));
+    ASSERT_TRUE(vkGetRayTracingShaderGroupHandlesNV != nullptr);
+
+    PFN_vkCmdTraceRaysNV vkCmdTraceRaysNV =
+        reinterpret_cast<PFN_vkCmdTraceRaysNV>(vkGetDeviceProcAddr(m_device->handle(), "vkCmdTraceRaysNV"));
+    ASSERT_TRUE(vkCmdTraceRaysNV != nullptr);
+
+    for (const auto &test : tests) {
+        m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, test.expected_error);
+
+        VkShaderObj rgen_shader(m_device, test.rgen_shader_source.c_str(), VK_SHADER_STAGE_RAYGEN_BIT_NV, this, "main");
+        VkShaderObj ahit_shader(m_device, test.ahit_shader_source.c_str(), VK_SHADER_STAGE_ANY_HIT_BIT_NV, this, "main");
+        VkShaderObj chit_shader(m_device, test.chit_shader_source.c_str(), VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV, this, "main");
+        VkShaderObj miss_shader(m_device, test.miss_shader_source.c_str(), VK_SHADER_STAGE_MISS_BIT_NV, this, "main");
+        VkShaderObj intr_shader(m_device, test.intr_shader_source.c_str(), VK_SHADER_STAGE_INTERSECTION_BIT_NV, this, "main");
+        VkShaderObj call_shader(m_device, test.call_shader_source.c_str(), VK_SHADER_STAGE_CALLABLE_BIT_NV, this, "main");
+
+        VkPipelineShaderStageCreateInfo stage_create_infos[6] = {};
+        stage_create_infos[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stage_create_infos[0].stage = VK_SHADER_STAGE_RAYGEN_BIT_NV;
+        stage_create_infos[0].module = rgen_shader.handle();
+        stage_create_infos[0].pName = "main";
+
+        stage_create_infos[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stage_create_infos[1].stage = VK_SHADER_STAGE_ANY_HIT_BIT_NV;
+        stage_create_infos[1].module = ahit_shader.handle();
+        stage_create_infos[1].pName = "main";
+
+        stage_create_infos[2].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stage_create_infos[2].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_NV;
+        stage_create_infos[2].module = chit_shader.handle();
+        stage_create_infos[2].pName = "main";
+
+        stage_create_infos[3].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stage_create_infos[3].stage = VK_SHADER_STAGE_MISS_BIT_NV;
+        stage_create_infos[3].module = miss_shader.handle();
+        stage_create_infos[3].pName = "main";
+
+        stage_create_infos[4].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stage_create_infos[4].stage = VK_SHADER_STAGE_INTERSECTION_BIT_NV;
+        stage_create_infos[4].module = intr_shader.handle();
+        stage_create_infos[4].pName = "main";
+
+        stage_create_infos[5].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stage_create_infos[5].stage = VK_SHADER_STAGE_CALLABLE_BIT_NV;
+        stage_create_infos[5].module = call_shader.handle();
+        stage_create_infos[5].pName = "main";
+
+        VkRayTracingShaderGroupCreateInfoNV group_create_infos[4] = {};
+        group_create_infos[0].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_NV;
+        group_create_infos[0].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;
+        group_create_infos[0].generalShader = 0;  // rgen
+        group_create_infos[0].closestHitShader = VK_SHADER_UNUSED_NV;
+        group_create_infos[0].anyHitShader = VK_SHADER_UNUSED_NV;
+        group_create_infos[0].intersectionShader = VK_SHADER_UNUSED_NV;
+
+        group_create_infos[1].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_NV;
+        group_create_infos[1].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;
+        group_create_infos[1].generalShader = 3;  // miss
+        group_create_infos[1].closestHitShader = VK_SHADER_UNUSED_NV;
+        group_create_infos[1].anyHitShader = VK_SHADER_UNUSED_NV;
+        group_create_infos[1].intersectionShader = VK_SHADER_UNUSED_NV;
+
+        group_create_infos[2].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_NV;
+        group_create_infos[2].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_NV;
+        group_create_infos[2].generalShader = VK_SHADER_UNUSED_NV;
+        group_create_infos[2].closestHitShader = 2;
+        group_create_infos[2].anyHitShader = 1;
+        group_create_infos[2].intersectionShader = 4;
+
+        group_create_infos[3].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_NV;
+        group_create_infos[3].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_NV;
+        group_create_infos[3].generalShader = 5;  // call
+        group_create_infos[3].closestHitShader = VK_SHADER_UNUSED_NV;
+        group_create_infos[3].anyHitShader = VK_SHADER_UNUSED_NV;
+        group_create_infos[3].intersectionShader = VK_SHADER_UNUSED_NV;
+
+        VkRayTracingPipelineCreateInfoNV pipeline_ci = {};
+        pipeline_ci.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_NV;
+        pipeline_ci.stageCount = 6;
+        pipeline_ci.pStages = stage_create_infos;
+        pipeline_ci.groupCount = 4;
+        pipeline_ci.pGroups = group_create_infos;
+        pipeline_ci.maxRecursionDepth = 2;
+        pipeline_ci.layout = test.variable_length ? pipeline_layout_variable.handle() : pipeline_layout.handle();
+
+        VkPipeline pipeline = VK_NULL_HANDLE;
+        ASSERT_VK_SUCCESS(vkCreateRayTracingPipelinesNV(m_device->handle(), VK_NULL_HANDLE, 1, &pipeline_ci, nullptr, &pipeline));
+
+        std::vector<uint8_t> shader_binding_table_data;
+        shader_binding_table_data.resize(static_cast<std::size_t>(shader_binding_table_buffer_size), 0);
+        ASSERT_VK_SUCCESS(vkGetRayTracingShaderGroupHandlesNV(m_device->handle(), pipeline, 0, 4,
+                                                              static_cast<std::size_t>(shader_binding_table_buffer_size),
+                                                              shader_binding_table_data.data()));
+
+        uint8_t *mapped_shader_binding_table_data = (uint8_t *)shader_binding_table_buffer.memory().map();
+        std::memcpy(mapped_shader_binding_table_data, shader_binding_table_data.data(), shader_binding_table_data.size());
+        shader_binding_table_buffer.memory().unmap();
+
+        ray_tracing_command_buffer.begin();
+
+        vkCmdBindPipeline(ray_tracing_command_buffer.handle(), VK_PIPELINE_BIND_POINT_RAY_TRACING_NV, pipeline);
+        vkCmdBindDescriptorSets(ray_tracing_command_buffer.handle(), VK_PIPELINE_BIND_POINT_RAY_TRACING_NV,
+                                test.variable_length ? pipeline_layout_variable.handle() : pipeline_layout.handle(), 0, 1,
+                                test.variable_length ? &ds_variable.set_ : &ds.set_, 0, nullptr);
+
+        vkCmdTraceRaysNV(ray_tracing_command_buffer.handle(), shader_binding_table_buffer.handle(),
+                         ray_tracing_properties.shaderGroupHandleSize * 0ull, shader_binding_table_buffer.handle(),
+                         ray_tracing_properties.shaderGroupHandleSize * 1ull, ray_tracing_properties.shaderGroupHandleSize,
+                         shader_binding_table_buffer.handle(), ray_tracing_properties.shaderGroupHandleSize * 2ull,
+                         ray_tracing_properties.shaderGroupHandleSize, shader_binding_table_buffer.handle(),
+                         ray_tracing_properties.shaderGroupHandleSize * 3ull, ray_tracing_properties.shaderGroupHandleSize,
+                         /*width=*/1, /*height=*/1, /*depth=*/1);
+
+        ray_tracing_command_buffer.end();
+
+        // Update the index of the texture that the shaders should read
+        uint32_t *mapped_storage_buffer_data = (uint32_t *)storage_buffer.memory().map();
+        mapped_storage_buffer_data[0] = test.rgen_index;
+        mapped_storage_buffer_data[1] = test.ahit_index;
+        mapped_storage_buffer_data[2] = test.chit_index;
+        mapped_storage_buffer_data[3] = test.miss_index;
+        mapped_storage_buffer_data[4] = test.intr_index;
+        mapped_storage_buffer_data[5] = test.call_index;
+        mapped_storage_buffer_data[6] = 0;
+        mapped_storage_buffer_data[7] = 0;
+        mapped_storage_buffer_data[8] = 0;
+        mapped_storage_buffer_data[9] = 0;
+        mapped_storage_buffer_data[10] = 0;
+        mapped_storage_buffer_data[11] = 0;
+        storage_buffer.memory().unmap();
+
+        vkQueueSubmit(ray_tracing_queue, 1, &submit_info, VK_NULL_HANDLE);
+        vkQueueWaitIdle(ray_tracing_queue);
+        m_errorMonitor->VerifyFound();
+
+        mapped_storage_buffer_data = (uint32_t *)storage_buffer.memory().map();
+        ASSERT_TRUE(mapped_storage_buffer_data[6] == 1);
+        ASSERT_TRUE(mapped_storage_buffer_data[7] == 2);
+        ASSERT_TRUE(mapped_storage_buffer_data[8] == 3);
+        ASSERT_TRUE(mapped_storage_buffer_data[9] == 4);
+        ASSERT_TRUE(mapped_storage_buffer_data[10] == 5);
+        ASSERT_TRUE(mapped_storage_buffer_data[11] == 6);
+        storage_buffer.memory().unmap();
+
+        vkDestroyPipeline(m_device->handle(), pipeline, nullptr);
+    }
+}
+
 TEST_F(VkLayerTest, InvalidDescriptorPoolConsistency) {
     VkResult err;
 
@@ -1102,6 +2088,96 @@ TEST_F(VkLayerTest, RenderPassCreateInvalidInputAttachmentReferences) {
     TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, false, "VUID-VkRenderPassCreateInfo-pNext-01927", nullptr);
 }
 
+TEST_F(VkLayerTest, RenderPassCreateInvalidFragmentDensityMapReferences) {
+    TEST_DESCRIPTION("Create a subpass with the wrong attachment information for a fragment density map ");
+
+    // Check for VK_KHR_get_physical_device_properties2
+    if (InstanceExtensionSupported(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME)) {
+        m_instance_extension_names.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+    } else {
+        printf("%s Extension %s is not supported.\n", kSkipPrefix, VK_EXT_FRAGMENT_DENSITY_MAP_EXTENSION_NAME);
+        return;
+    }
+
+    ASSERT_NO_FATAL_FAILURE(InitFramework(myDbgFunc, m_errorMonitor));
+
+    if (DeviceExtensionSupported(gpu(), nullptr, VK_EXT_FRAGMENT_DENSITY_MAP_EXTENSION_NAME)) {
+        m_device_extension_names.push_back(VK_EXT_FRAGMENT_DENSITY_MAP_EXTENSION_NAME);
+    } else {
+        printf("%s Extension %s is not supported.\n", kSkipPrefix, VK_EXT_FRAGMENT_DENSITY_MAP_EXTENSION_NAME);
+        return;
+    }
+
+    ASSERT_NO_FATAL_FAILURE(InitState());
+
+    VkAttachmentDescription attach = {0,
+                                      VK_FORMAT_R8G8_UNORM,
+                                      VK_SAMPLE_COUNT_1_BIT,
+                                      VK_ATTACHMENT_LOAD_OP_LOAD,
+                                      VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                                      VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                                      VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                                      VK_IMAGE_LAYOUT_UNDEFINED,
+                                      VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT};
+    // Set 1 instead of 0
+    VkAttachmentReference ref = {1, VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT};
+    VkSubpassDescription subpass = {0, VK_PIPELINE_BIND_POINT_GRAPHICS, 1, &ref, 0, nullptr, nullptr, nullptr, 0, nullptr};
+    VkRenderPassFragmentDensityMapCreateInfoEXT rpfdmi = {VK_STRUCTURE_TYPE_RENDER_PASS_FRAGMENT_DENSITY_MAP_CREATE_INFO_EXT,
+                                                          nullptr, ref};
+
+    VkRenderPassCreateInfo rpci = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, &rpfdmi, 0, 1, &attach, 1, &subpass, 0, nullptr};
+
+    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, false,
+                         "VUID-VkRenderPassFragmentDensityMapCreateInfoEXT-fragmentDensityMapAttachment-02547", nullptr);
+
+    // Set wrong VkImageLayout
+    ref = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    subpass = {0, VK_PIPELINE_BIND_POINT_GRAPHICS, 1, &ref, 0, nullptr, nullptr, nullptr, 0, nullptr};
+    rpfdmi = {VK_STRUCTURE_TYPE_RENDER_PASS_FRAGMENT_DENSITY_MAP_CREATE_INFO_EXT, nullptr, ref};
+    rpci = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, &rpfdmi, 0, 1, &attach, 1, &subpass, 0, nullptr};
+
+    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, false,
+                         "VUID-VkRenderPassFragmentDensityMapCreateInfoEXT-fragmentDensityMapAttachment-02549", nullptr);
+
+    // Set wrong load operation
+    attach = {0,
+              VK_FORMAT_R8G8_UNORM,
+              VK_SAMPLE_COUNT_1_BIT,
+              VK_ATTACHMENT_LOAD_OP_CLEAR,
+              VK_ATTACHMENT_STORE_OP_DONT_CARE,
+              VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+              VK_ATTACHMENT_STORE_OP_DONT_CARE,
+              VK_IMAGE_LAYOUT_UNDEFINED,
+              VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT};
+
+    ref = {0, VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT};
+    subpass = {0, VK_PIPELINE_BIND_POINT_GRAPHICS, 1, &ref, 0, nullptr, nullptr, nullptr, 0, nullptr};
+    rpfdmi = {VK_STRUCTURE_TYPE_RENDER_PASS_FRAGMENT_DENSITY_MAP_CREATE_INFO_EXT, nullptr, ref};
+    rpci = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, &rpfdmi, 0, 1, &attach, 1, &subpass, 0, nullptr};
+
+    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, false,
+                         "VUID-VkRenderPassFragmentDensityMapCreateInfoEXT-fragmentDensityMapAttachment-02550", nullptr);
+
+    // Set wrong store operation
+    attach = {0,
+              VK_FORMAT_R8G8_UNORM,
+              VK_SAMPLE_COUNT_1_BIT,
+              VK_ATTACHMENT_LOAD_OP_LOAD,
+              VK_ATTACHMENT_STORE_OP_STORE,
+              VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+              VK_ATTACHMENT_STORE_OP_DONT_CARE,
+              VK_IMAGE_LAYOUT_UNDEFINED,
+              VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT};
+
+    ref = {0, VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT};
+    subpass = {0, VK_PIPELINE_BIND_POINT_GRAPHICS, 1, &ref, 0, nullptr, nullptr, nullptr, 0, nullptr};
+    rpfdmi = {VK_STRUCTURE_TYPE_RENDER_PASS_FRAGMENT_DENSITY_MAP_CREATE_INFO_EXT, nullptr, ref};
+    rpci = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, &rpfdmi, 0, 1, &attach, 1, &subpass, 0, nullptr};
+
+    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, false,
+                         "VUID-VkRenderPassFragmentDensityMapCreateInfoEXT-fragmentDensityMapAttachment-02551", nullptr);
+}
+
 TEST_F(VkLayerTest, RenderPassCreateSubpassNonGraphicsPipeline) {
     TEST_DESCRIPTION("Create a subpass with the compute pipeline bind point");
     // Check for VK_KHR_get_physical_device_properties2
@@ -1217,10 +2293,10 @@ TEST_F(VkLayerTest, RenderPassCreateInvalidSubpassDependencies) {
 
     ASSERT_NO_FATAL_FAILURE(InitFramework(myDbgFunc, m_errorMonitor));
 
-    bool rp2Supported = CheckCreateRenderPass2Support(this, m_device_extension_names);
-    bool multiviewSupported = rp2Supported;
+    bool rp2_supported = CheckCreateRenderPass2Support(this, m_device_extension_names);
+    bool multiviewSupported = rp2_supported;
 
-    if (!rp2Supported && DeviceExtensionSupported(gpu(), nullptr, VK_KHR_MULTIVIEW_EXTENSION_NAME)) {
+    if (!rp2_supported && DeviceExtensionSupported(gpu(), nullptr, VK_KHR_MULTIVIEW_EXTENSION_NAME)) {
         m_device_extension_names.push_back(VK_KHR_MULTIVIEW_EXTENSION_NAME);
         multiviewSupported = true;
     }
@@ -1241,92 +2317,96 @@ TEST_F(VkLayerTest, RenderPassCreateInvalidSubpassDependencies) {
 
     VkSubpassDependency dependency;
     VkRenderPassCreateInfo rpci = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, nullptr, 0, 0, nullptr, 2, subpasses, 1, &dependency};
-    // dependency = { 0, 1, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, 0 };
 
-    // Source subpass is not EXTERNAL, so source stage mask must not include HOST
-    dependency = {0, 1, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, 0};
+    // Non graphics stages in subpass dependency
+    dependency = {0, 1, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
+                  VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT};
+    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported,
+                         "VUID-VkRenderPassCreateInfo-pDependencies-00837", "VUID-VkRenderPassCreateInfo2KHR-pDependencies-03054");
 
-    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2Supported, "VUID-VkSubpassDependency-srcSubpass-00858",
-                         "VUID-VkSubpassDependency2KHR-srcSubpass-03078");
+    dependency = {0, 1, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, 0};
+    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported,
+                         "VUID-VkRenderPassCreateInfo-pDependencies-00837", "VUID-VkRenderPassCreateInfo2KHR-pDependencies-03054");
 
-    // Destination subpass is not EXTERNAL, so destination stage mask must not include HOST
+    dependency = {0, 1, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, 0};
+    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported,
+                         "VUID-VkRenderPassCreateInfo-pDependencies-00837", "VUID-VkRenderPassCreateInfo2KHR-pDependencies-03054");
+
+    dependency = {0, 1, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT};
+    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported,
+                         "VUID-VkRenderPassCreateInfo-pDependencies-00838", "VUID-VkRenderPassCreateInfo2KHR-pDependencies-03055");
+
     dependency = {0, 1, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 0, 0};
+    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported,
+                         "VUID-VkRenderPassCreateInfo-pDependencies-00838", "VUID-VkRenderPassCreateInfo2KHR-pDependencies-03055");
 
-    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2Supported, "VUID-VkSubpassDependency-dstSubpass-00859",
-                         "VUID-VkSubpassDependency2KHR-dstSubpass-03079");
+    dependency = {0, VK_SUBPASS_EXTERNAL, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, 0};
+    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported,
+                         "VUID-VkRenderPassCreateInfo-pDependencies-00837", "VUID-VkRenderPassCreateInfo2KHR-pDependencies-03054");
+
+    dependency = {VK_SUBPASS_EXTERNAL, 0, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, 0};
+    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported,
+                         "VUID-VkRenderPassCreateInfo-pDependencies-00838", "VUID-VkRenderPassCreateInfo2KHR-pDependencies-03055");
+
+    dependency = {0, 0, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, 0};
+    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported,
+                         "VUID-VkRenderPassCreateInfo-pDependencies-00837", "VUID-VkRenderPassCreateInfo2KHR-pDependencies-03054");
 
     // Geometry shaders not enabled source
     dependency = {0, 1, VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, 0};
 
-    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2Supported, "VUID-VkSubpassDependency-srcStageMask-00860",
+    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported, "VUID-VkSubpassDependency-srcStageMask-00860",
                          "VUID-VkSubpassDependency2KHR-srcStageMask-03080");
 
     // Geometry shaders not enabled destination
     dependency = {0, 1, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT, 0, 0, 0};
 
-    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2Supported, "VUID-VkSubpassDependency-dstStageMask-00861",
+    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported, "VUID-VkSubpassDependency-dstStageMask-00861",
                          "VUID-VkSubpassDependency2KHR-dstStageMask-03081");
 
     // Tessellation not enabled source
     dependency = {0, 1, VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, 0};
 
-    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2Supported, "VUID-VkSubpassDependency-srcStageMask-00862",
+    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported, "VUID-VkSubpassDependency-srcStageMask-00862",
                          "VUID-VkSubpassDependency2KHR-srcStageMask-03082");
 
     // Tessellation not enabled destination
     dependency = {0, 1, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT, 0, 0, 0};
 
-    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2Supported, "VUID-VkSubpassDependency-dstStageMask-00863",
+    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported, "VUID-VkSubpassDependency-dstStageMask-00863",
                          "VUID-VkSubpassDependency2KHR-dstStageMask-03083");
 
     // Potential cyclical dependency
     dependency = {1, 0, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, 0};
 
-    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2Supported, "VUID-VkSubpassDependency-srcSubpass-00864",
+    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported, "VUID-VkSubpassDependency-srcSubpass-00864",
                          "VUID-VkSubpassDependency2KHR-srcSubpass-03084");
 
     // EXTERNAL to EXTERNAL dependency
     dependency = {
         VK_SUBPASS_EXTERNAL, VK_SUBPASS_EXTERNAL, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, 0};
 
-    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2Supported, "VUID-VkSubpassDependency-srcSubpass-00865",
+    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported, "VUID-VkSubpassDependency-srcSubpass-00865",
                          "VUID-VkSubpassDependency2KHR-srcSubpass-03085");
-
-    // Source compute stage not part of subpass 0's GRAPHICS pipeline
-    dependency = {0, VK_SUBPASS_EXTERNAL, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, 0};
-
-    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2Supported, "VUID-VkRenderPassCreateInfo-pDependencies-00837",
-                         "VUID-VkRenderPassCreateInfo2KHR-pDependencies-03054");
-
-    // Destination compute stage not part of subpass 0's GRAPHICS pipeline
-    dependency = {VK_SUBPASS_EXTERNAL, 0, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, 0};
-
-    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2Supported, "VUID-VkRenderPassCreateInfo-pDependencies-00838",
-                         "VUID-VkRenderPassCreateInfo2KHR-pDependencies-03055");
-
-    // Non graphics stage in self dependency
-    dependency = {0, 0, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, 0};
-
-    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2Supported, "VUID-VkSubpassDependency-srcSubpass-01989",
-                         "VUID-VkSubpassDependency2KHR-srcSubpass-02244");
 
     // Logically later source stages in self dependency
     dependency = {0, 0, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, 0, 0, 0};
 
-    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2Supported, "VUID-VkSubpassDependency-srcSubpass-00867",
+    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported, "VUID-VkSubpassDependency-srcSubpass-00867",
                          "VUID-VkSubpassDependency2KHR-srcSubpass-03087");
 
     // Source access mask mismatch with source stage mask
     dependency = {0, 1, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_ACCESS_UNIFORM_READ_BIT, 0, 0};
 
-    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2Supported, "VUID-VkSubpassDependency-srcAccessMask-00868",
+    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported, "VUID-VkSubpassDependency-srcAccessMask-00868",
                          "VUID-VkSubpassDependency2KHR-srcAccessMask-03088");
 
     // Destination access mask mismatch with destination stage mask
     dependency = {
         0, 1, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 0};
 
-    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2Supported, "VUID-VkSubpassDependency-dstAccessMask-00869",
+    TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported, "VUID-VkSubpassDependency-dstAccessMask-00869",
                          "VUID-VkSubpassDependency2KHR-dstAccessMask-03089");
 
     if (multiviewSupported) {
@@ -1334,7 +2414,7 @@ TEST_F(VkLayerTest, RenderPassCreateInvalidSubpassDependencies) {
         dependency = {0, 1, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
                       0, 0, VK_DEPENDENCY_VIEW_LOCAL_BIT};
 
-        TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2Supported, nullptr,
+        TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported, nullptr,
                              "VUID-VkRenderPassCreateInfo2KHR-viewMask-03059");
 
         // Enable multiview
@@ -1366,13 +2446,13 @@ TEST_F(VkLayerTest, RenderPassCreateInvalidSubpassDependencies) {
         rpmvci.dependencyCount = 0;
 
         // View offset with no view local bit
-        if (rp2Supported) {
+        if (rp2_supported) {
             dependency = {0, VK_SUBPASS_EXTERNAL, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, 0};
             rpmvci.pViewOffsets = pViewOffsets;
             pViewOffsets[0] = 1;
             rpmvci.dependencyCount = 1;
 
-            TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2Supported, nullptr,
+            TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported, nullptr,
                                  "VUID-VkSubpassDependency2KHR-dependencyFlags-03092");
 
             rpmvci.dependencyCount = 0;
@@ -1382,7 +2462,7 @@ TEST_F(VkLayerTest, RenderPassCreateInvalidSubpassDependencies) {
         dependency = {VK_SUBPASS_EXTERNAL,         1, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0,
                       VK_DEPENDENCY_VIEW_LOCAL_BIT};
 
-        TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2Supported,
+        TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported,
                              "VUID-VkSubpassDependency-dependencyFlags-02520",
                              "VUID-VkSubpassDependency2KHR-dependencyFlags-03090");
 
@@ -1390,14 +2470,14 @@ TEST_F(VkLayerTest, RenderPassCreateInvalidSubpassDependencies) {
         dependency = {0, VK_SUBPASS_EXTERNAL,         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0,
                       0, VK_DEPENDENCY_VIEW_LOCAL_BIT};
 
-        TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2Supported,
+        TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported,
                              "VUID-VkSubpassDependency-dependencyFlags-02521",
                              "VUID-VkSubpassDependency2KHR-dependencyFlags-03091");
 
         // Multiple views but no view local bit in self-dependency
         dependency = {0, 0, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, 0};
 
-        TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2Supported, "VUID-VkSubpassDependency-srcSubpass-00872",
+        TestRenderPassCreate(m_errorMonitor, m_device->device(), &rpci, rp2_supported, "VUID-VkSubpassDependency-srcSubpass-00872",
                              "VUID-VkRenderPassCreateInfo2KHR-pDependencies-03060");
     }
 }
@@ -2115,9 +3195,26 @@ TEST_F(VkLayerTest, FramebufferCreateErrors) {
         " 6. Framebuffer attachment where dimensions don't match\n"
         " 7. Framebuffer attachment where dimensions don't match\n"
         " 8. Framebuffer attachment w/o identity swizzle\n"
-        " 9. framebuffer dimensions exceed physical device limits\n");
+        " 9. framebuffer dimensions exceed physical device limits\n"
+        "10. null pAttachments\n");
 
-    ASSERT_NO_FATAL_FAILURE(Init());
+    // Check for VK_KHR_get_physical_device_properties2
+    bool push_physical_device_properties_2_support =
+        InstanceExtensionSupported(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+    if (push_physical_device_properties_2_support) {
+        m_instance_extension_names.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+    }
+
+    ASSERT_NO_FATAL_FAILURE(InitFramework(myDbgFunc, m_errorMonitor));
+
+    bool push_fragment_density_support = false;
+
+    if (push_physical_device_properties_2_support) {
+        push_fragment_density_support = DeviceExtensionSupported(gpu(), nullptr, VK_EXT_FRAGMENT_DENSITY_MAP_EXTENSION_NAME);
+        if (push_fragment_density_support) m_device_extension_names.push_back(VK_EXT_FRAGMENT_DENSITY_MAP_EXTENSION_NAME);
+    }
+
+    ASSERT_NO_FATAL_FAILURE(InitState(nullptr, nullptr, 0));
     ASSERT_NO_FATAL_FAILURE(InitRenderTarget());
 
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkFramebufferCreateInfo-attachmentCount-00876");
@@ -2274,6 +3371,120 @@ TEST_F(VkLayerTest, FramebufferCreateErrors) {
     }
 
     {
+        if (!push_fragment_density_support) {
+            printf("%s VK_EXT_fragment_density_map Extension not supported, skipping tests\n", kSkipPrefix);
+        } else {
+            uint32_t attachment_width = 512;
+            uint32_t attachment_height = 512;
+            VkFormat attachment_format = VK_FORMAT_R8G8_UNORM;
+            uint32_t frame_width = 512;
+            uint32_t frame_height = 512;
+
+            // Create a renderPass with a single color attachment for fragment density map
+            VkAttachmentReference attach_fragment_density_map = {};
+            attach_fragment_density_map.layout = VK_IMAGE_LAYOUT_GENERAL;
+            VkSubpassDescription subpass_fragment_density_map = {};
+            subpass_fragment_density_map.pColorAttachments = &attach_fragment_density_map;
+            VkRenderPassCreateInfo rpci_fragment_density_map = {};
+            rpci_fragment_density_map.subpassCount = 1;
+            rpci_fragment_density_map.pSubpasses = &subpass_fragment_density_map;
+            rpci_fragment_density_map.attachmentCount = 1;
+            VkAttachmentDescription attach_desc_fragment_density_map = {};
+            attach_desc_fragment_density_map.format = attachment_format;
+            attach_desc_fragment_density_map.samples = VK_SAMPLE_COUNT_1_BIT;
+            attach_desc_fragment_density_map.finalLayout = VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT;
+            rpci_fragment_density_map.pAttachments = &attach_desc_fragment_density_map;
+            rpci_fragment_density_map.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+            VkRenderPass rp_fragment_density_map;
+
+            err = vkCreateRenderPass(m_device->device(), &rpci_fragment_density_map, NULL, &rp_fragment_density_map);
+            ASSERT_VK_SUCCESS(err);
+
+            // Create view attachment
+            VkImageView view_fragment_density_map;
+            VkImageViewCreateInfo ivci = {};
+            ivci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            ivci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            ivci.format = attachment_format;
+            ivci.flags = 0;
+            ivci.subresourceRange.layerCount = 1;
+            ivci.subresourceRange.baseMipLevel = 0;
+            ivci.subresourceRange.levelCount = 1;
+            ivci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+            VkFramebufferAttachmentImageInfoKHR fb_fdm = {};
+            fb_fdm.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_ATTACHMENT_IMAGE_INFO_KHR;
+            fb_fdm.usage = VK_IMAGE_USAGE_FRAGMENT_DENSITY_MAP_BIT_EXT;
+            fb_fdm.width = frame_width;
+            fb_fdm.height = frame_height;
+            fb_fdm.layerCount = 1;
+            fb_fdm.viewFormatCount = 1;
+            fb_fdm.pViewFormats = &attachment_format;
+            VkFramebufferAttachmentsCreateInfoKHR fb_aci_fdm = {};
+            fb_aci_fdm.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_ATTACHMENTS_CREATE_INFO_KHR;
+            fb_aci_fdm.attachmentImageInfoCount = 1;
+            fb_aci_fdm.pAttachmentImageInfos = &fb_fdm;
+
+            VkFramebufferCreateInfo fbci = {};
+            fbci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+            fbci.pNext = &fb_aci_fdm;
+            fbci.flags = 0;
+            fbci.width = frame_width;
+            fbci.height = frame_height;
+            fbci.layers = 1;
+            fbci.renderPass = rp_fragment_density_map;
+            fbci.attachmentCount = 1;
+            fbci.pAttachments = &view_fragment_density_map;
+
+            // Set small width
+            VkImageObj image2(m_device);
+            image2.Init(16, attachment_height, 1, attachment_format, VK_IMAGE_USAGE_FRAGMENT_DENSITY_MAP_BIT_EXT,
+                        VK_IMAGE_TILING_LINEAR, 0);
+            ASSERT_TRUE(image2.initialized());
+
+            ivci.image = image2.handle();
+            err = vkCreateImageView(m_device->device(), &ivci, NULL, &view_fragment_density_map);
+            ASSERT_VK_SUCCESS(err);
+
+            fbci.pAttachments = &view_fragment_density_map;
+
+            m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkFramebufferCreateInfo-pAttachments-02555");
+            err = vkCreateFramebuffer(device(), &fbci, NULL, &fb);
+
+            m_errorMonitor->VerifyFound();
+            if (err == VK_SUCCESS) {
+                vkDestroyFramebuffer(m_device->device(), fb, NULL);
+            }
+
+            vkDestroyImageView(m_device->device(), view_fragment_density_map, NULL);
+
+            // Set small height
+            VkImageObj image3(m_device);
+            image3.Init(attachment_width, 16, 1, attachment_format, VK_IMAGE_USAGE_FRAGMENT_DENSITY_MAP_BIT_EXT,
+                        VK_IMAGE_TILING_LINEAR, 0);
+            ASSERT_TRUE(image3.initialized());
+
+            ivci.image = image3.handle();
+            err = vkCreateImageView(m_device->device(), &ivci, NULL, &view_fragment_density_map);
+            ASSERT_VK_SUCCESS(err);
+
+            fbci.pAttachments = &view_fragment_density_map;
+
+            m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkFramebufferCreateInfo-pAttachments-02556");
+            err = vkCreateFramebuffer(device(), &fbci, NULL, &fb);
+
+            m_errorMonitor->VerifyFound();
+            if (err == VK_SUCCESS) {
+                vkDestroyFramebuffer(m_device->device(), fb, NULL);
+            }
+
+            vkDestroyImageView(m_device->device(), view_fragment_density_map, NULL);
+
+            vkDestroyRenderPass(m_device->device(), rp_fragment_density_map, NULL);
+        }
+    }
+
+    {
         // Create an image with one mip level.
         VkImageObj image(m_device);
         image.Init(128, 128, 1, VK_FORMAT_B8G8R8A8_UNORM, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_IMAGE_TILING_OPTIMAL, 0);
@@ -2369,6 +3580,16 @@ TEST_F(VkLayerTest, FramebufferCreateErrors) {
     // and layers=0
     fb_info.layers = 0;
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID-VkFramebufferCreateInfo-layers-00889");
+    err = vkCreateFramebuffer(device(), &fb_info, NULL, &fb);
+    m_errorMonitor->VerifyFound();
+    if (err == VK_SUCCESS) {
+        vkDestroyFramebuffer(m_device->device(), fb, NULL);
+    }
+
+    // Try to create with pAttachments = NULL
+    fb_info.layers = 1;
+    fb_info.pAttachments = NULL;
+    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, "VUID_Undefined");
     err = vkCreateFramebuffer(device(), &fb_info, NULL, &fb);
     m_errorMonitor->VerifyFound();
     if (err == VK_SUCCESS) {
