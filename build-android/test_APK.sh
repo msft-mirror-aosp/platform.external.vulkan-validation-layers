@@ -31,7 +31,6 @@ function printUsage {
    echo "    -p|--platform <platform> (optional)"
    echo "    -f|--filter <gtest filter list> (optional)"
    echo "    -s|--serial <target device serial number> (optional)"
-   echo "    -a|--abi <target abi> (optional)"
    echo
    echo "i.e. ${0##*/} -p <platform> -f <test filter> -s <serial number>"
    exit 1
@@ -59,10 +58,6 @@ do
             ;;
         -s|--serial)
             serial="$2"
-            shift 2
-            ;;
-        -a|--abi)
-            abi="$2"
             shift 2
             ;;
         -*)
@@ -103,7 +98,6 @@ fi
 if [[ $platform ]]; then echo platform = "${platform}"; fi
 if [[ $filter ]]; then echo filter = "${filter}"; fi
 if [[ $serial ]]; then echo serial = "${serial}"; fi
-if [[ $abi ]]; then echo abi = "${abi}"; fi
 
 set -e
 
@@ -165,12 +159,7 @@ echo
 echo Installing ./bin/VulkanLayerValidationTests.apk...
 
 # Install the current build
-if [[ -z $abi ]]
-then
-  adb $serialFlag install -r bin/VulkanLayerValidationTests.apk
-else
-  adb $serialFlag install --abi $abi -r bin/VulkanLayerValidationTests.apk
-fi
+adb $serialFlag install -r bin/VulkanLayerValidationTests.apk
 
 echo
 echo Launching tests...
@@ -251,9 +240,7 @@ adb $serialFlag shell am force-stop com.example.VulkanLayerValidationTests
 echo
 echo Fetching test output and filtered logcat text...
 
-# Avoid characters that are illegal in Windows filenames, so these
-# files can be archived to a Windows host system for later reference
-today=$(date +%Y%m%d-%H%M%S)
+today=$(date +%Y-%m-%d.%H:%M:%S)
 outFile="VulkanLayerValidationTests.$platform.$today.out.txt"
 errFile="VulkanLayerValidationTests.$platform.$today.err.txt"
 logFile="VulkanLayerValidationTests.$platform.$today.logcat.txt"

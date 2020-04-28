@@ -65,6 +65,8 @@ THIS_DIR = os.path.realpath(os.path.dirname(__file__))
 ALL_ARCHITECTURES = (
   'arm',
   'arm64',
+  'mips',
+  'mips64',
   'x86',
   'x86_64',
 )
@@ -74,6 +76,8 @@ ALL_ARCHITECTURES = (
 ALL_ABIS = (
   'armeabi-v7a',
   'arm64-v8a',
+  'mips',
+  'mips64',
   'x86',
   'x86_64',
 )
@@ -85,6 +89,8 @@ def arch_to_abis(arch):
   return {
     'arm': ['armeabi-v7a'],
     'arm64': ['arm64-v8a'],
+    'mips': ['mips'],
+    'mips64': ['mips64'],
     'x86': ['x86'],
     'x86_64': ['x86_64'],
   }[arch]
@@ -262,6 +268,14 @@ def main():
               print(source_dir, ':', dest_dir, ":", f, "SKIPPED")
 
   print('Constructing Vulkan validation layer source...')
+
+  build_cmd = [
+    'bash', build_dir + '/vulkan/src/build-android/android-generate.sh',
+            build_dir + '/vulkan/src/registry'
+  ]
+  print('Generating generated layers...')
+  subprocess.check_call(build_cmd)
+  print('Generation finished')
 
   build_cmd = [
     'bash', ndk_build, '-C', build_dir + '/vulkan/src/build-android',
