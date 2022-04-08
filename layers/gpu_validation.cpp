@@ -730,10 +730,10 @@ static void GenerateStageMessage(const uint32_t *debug_record, std::string &msg)
                  << " Instance Index = " << debug_record[kInstVertOutInstanceIndex] << ". ";
         } break;
         case spv::ExecutionModelTessellationControl: {
-            strm << "Stage = Tessellation Control.  Invocation ID = " << debug_record[kInstTessCtlOutInvocationId] << ". ";
+            strm << "Stage = Tessellation Control.  Invocation ID = " << debug_record[kInstTessOutInvocationId] << ". ";
         } break;
         case spv::ExecutionModelTessellationEvaluation: {
-            strm << "Stage = Tessellation Eval.  Invocation ID = " << debug_record[kInstTessCtlOutInvocationId] << ". ";
+            strm << "Stage = Tessellation Eval.  Invocation ID = " << debug_record[kInstTessOutInvocationId] << ". ";
         } break;
         case spv::ExecutionModelGeometry: {
             strm << "Stage = Geometry.  Primitive ID = " << debug_record[kInstGeomOutPrimitiveId]
@@ -745,7 +745,7 @@ static void GenerateStageMessage(const uint32_t *debug_record, std::string &msg)
                  << *reinterpret_cast<const float *>(&debug_record[kInstFragOutFragCoordY]) << "). ";
         } break;
         case spv::ExecutionModelGLCompute: {
-            strm << "Stage = Compute.  Global invocation ID = " << debug_record[kInstCompOutGlobalInvocationIdX] << ". ";
+            strm << "Stage = Compute.  Global invocation ID = " << debug_record[kInstCompOutGlobalInvocationId] << ". ";
         } break;
         case spv::ExecutionModelRayGenerationNV: {
             strm << "Stage = Ray Generation.  Global Launch ID (x,y,z) = (" << debug_record[kInstRayTracingOutLaunchIdX] << ", "
@@ -785,12 +785,12 @@ static void GenerateValidationMessage(const uint32_t *debug_record, std::string 
     std::ostringstream strm;
     switch (debug_record[kInstValidationOutError]) {
         case 0: {
-            strm << "Index of " << debug_record[kInstBindlessBoundsOutDescIndex] << " used to index descriptor array of length "
-                 << debug_record[kInstBindlessBoundsOutDescBound] << ". ";
+            strm << "Index of " << debug_record[kInstBindlessOutDescIndex] << " used to index descriptor array of length "
+                 << debug_record[kInstBindlessOutDescBound] << ". ";
             vuid_msg = "UNASSIGNED-Descriptor index out of bounds";
         } break;
         case 1: {
-            strm << "Descriptor index " << debug_record[kInstBindlessBoundsOutDescIndex] << " is uninitialized. ";
+            strm << "Descriptor index " << debug_record[kInstBindlessOutDescIndex] << " is uninitialized. ";
             vuid_msg = "UNASSIGNED-Descriptor uninitialized";
         } break;
         default: {

@@ -22,9 +22,6 @@ VULKAN_INCLUDE := $(LOCAL_PATH)/$(SRC_DIR)/include
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := layer_utils
-LOCAL_LICENSE_KINDS := SPDX-license-identifier-Apache-2.0
-LOCAL_LICENSE_CONDITIONS := notice
-LOCAL_NOTICE_FILE := $(LOCAL_PATH)/../../LICENSE.txt $(LOCAL_PATH)/../../NOTICE
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/vk_layer_config.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/vk_layer_extension_utils.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/vk_layer_utils.cpp
@@ -38,9 +35,6 @@ include $(BUILD_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := VkLayer_khronos_validation
-LOCAL_LICENSE_KINDS := SPDX-license-identifier-Apache-2.0
-LOCAL_LICENSE_CONDITIONS := notice
-LOCAL_NOTICE_FILE := $(LOCAL_PATH)/../../LICENSE.txt $(LOCAL_PATH)/../../NOTICE
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/core_validation.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/drawdispatch.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/descriptor_sets.cpp
@@ -70,9 +64,6 @@ include $(BUILD_SHARED_LIBRARY)
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := VkLayer_core_validation
-LOCAL_LICENSE_KINDS := SPDX-license-identifier-Apache-2.0
-LOCAL_LICENSE_CONDITIONS := notice
-LOCAL_NOTICE_FILE := $(LOCAL_PATH)/../../LICENSE.txt $(LOCAL_PATH)/../../NOTICE
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/core_validation.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/drawdispatch.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/descriptor_sets.cpp
@@ -96,9 +87,6 @@ include $(BUILD_SHARED_LIBRARY)
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := VkLayer_parameter_validation
-LOCAL_LICENSE_KINDS := SPDX-license-identifier-Apache-2.0
-LOCAL_LICENSE_CONDITIONS := notice
-LOCAL_NOTICE_FILE := $(LOCAL_PATH)/../../LICENSE.txt $(LOCAL_PATH)/../../NOTICE
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/generated/parameter_validation.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/generated/layer_chassis_dispatch.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/generated/chassis.cpp
@@ -116,9 +104,6 @@ include $(BUILD_SHARED_LIBRARY)
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := VkLayer_object_tracker
-LOCAL_LICENSE_KINDS := SPDX-license-identifier-Apache-2.0
-LOCAL_LICENSE_CONDITIONS := notice
-LOCAL_NOTICE_FILE := $(LOCAL_PATH)/../../LICENSE.txt $(LOCAL_PATH)/../../NOTICE
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/generated/object_tracker.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/generated/layer_chassis_dispatch.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/generated/chassis.cpp
@@ -136,9 +121,6 @@ include $(BUILD_SHARED_LIBRARY)
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := VkLayer_threading
-LOCAL_LICENSE_KINDS := SPDX-license-identifier-Apache-2.0
-LOCAL_LICENSE_CONDITIONS := notice
-LOCAL_NOTICE_FILE := $(LOCAL_PATH)/../../LICENSE.txt $(LOCAL_PATH)/../../NOTICE
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/generated/thread_safety.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/generated/layer_chassis_dispatch.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/generated/chassis.cpp
@@ -155,9 +137,6 @@ include $(BUILD_SHARED_LIBRARY)
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := VkLayer_unique_objects
-LOCAL_LICENSE_KINDS := SPDX-license-identifier-Apache-2.0
-LOCAL_LICENSE_CONDITIONS := notice
-LOCAL_NOTICE_FILE := $(LOCAL_PATH)/../../LICENSE.txt $(LOCAL_PATH)/../../NOTICE
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/generated/layer_chassis_dispatch.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layers/generated/chassis.cpp
 LOCAL_C_INCLUDES += $(VULKAN_INCLUDE) \
@@ -173,9 +152,6 @@ include $(BUILD_SHARED_LIBRARY)
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := VkLayerValidationTests
-LOCAL_LICENSE_KINDS := SPDX-license-identifier-Apache-2.0
-LOCAL_LICENSE_CONDITIONS := notice
-LOCAL_NOTICE_FILE := $(LOCAL_PATH)/../../LICENSE.txt $(LOCAL_PATH)/../../NOTICE
 LOCAL_SRC_FILES += $(SRC_DIR)/tests/layer_validation_tests.cpp \
 				   $(SRC_DIR)/tests/vklayertests_pipeline_shader.cpp \
 				   $(SRC_DIR)/tests/vklayertests_buffer_image_memory_sampler.cpp \
@@ -206,9 +182,6 @@ include $(BUILD_EXECUTABLE)
 # Note: The following module is similar in name to the executable, but differs so that loader won't enumerate the resulting .so
 include $(CLEAR_VARS)
 LOCAL_MODULE := VulkanLayerValidationTests
-LOCAL_LICENSE_KINDS := SPDX-license-identifier-Apache-2.0
-LOCAL_LICENSE_CONDITIONS := notice
-LOCAL_NOTICE_FILE := $(LOCAL_PATH)/../../LICENSE.txt $(LOCAL_PATH)/../../NOTICE
 LOCAL_SRC_FILES += $(SRC_DIR)/tests/layer_validation_tests.cpp \
 				   $(SRC_DIR)/tests/vklayertests_pipeline_shader.cpp \
 				   $(SRC_DIR)/tests/vklayertests_buffer_image_memory_sampler.cpp \
